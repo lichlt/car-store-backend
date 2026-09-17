@@ -7,29 +7,29 @@ import {
   HttpStatus,
   forwardRef,
   Inject,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { JwtService } from '@nestjs/jwt';
-import { Repository, IsNull, LessThan, Not } from 'typeorm';
-import { Response } from 'express';
-import { randomUUID } from 'crypto';
-import * as bcrypt from 'bcryptjs';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { InjectRepository } from "@nestjs/typeorm";
+import { JwtService } from "@nestjs/jwt";
+import { Repository, IsNull, LessThan, Not } from "typeorm";
+import { Response } from "express";
+import { randomUUID } from "crypto";
+import * as bcrypt from "bcryptjs";
 
-import { User } from '../users/entities/user.entity';
-import { Role } from '../users/entities/role.entity';
-import { RefreshToken } from './entities/refresh-token.entity';
-import { LoginOtpToken } from './entities/login-otp-token.entity';
-import { PasswordResetToken } from './entities/password-reset-token.entity';
-import { JwtPayload } from '../../common/types/jwt-payload.interface';
-import { MailService } from './mail.service';
+import { User } from "../users/entities/user.entity";
+import { Role } from "../users/entities/role.entity";
+import { RefreshToken } from "./entities/refresh-token.entity";
+import { LoginOtpToken } from "./entities/login-otp-token.entity";
+import { PasswordResetToken } from "./entities/password-reset-token.entity";
+import { JwtPayload } from "../../common/types/jwt-payload.interface";
+import { MailService } from "./mail.service";
 import {
   hashToken,
   generateOtp,
   generateSecureToken,
   normalizeEmail,
-} from '../../common/utils/crypto.utils';
-import { REFRESH_TOKEN_COOKIE } from '../../common/constants/app.constants';
+} from "../../common/utils/crypto.utils";
+import { REFRESH_TOKEN_COOKIE } from "../../common/constants/app.constants";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -73,15 +73,15 @@ export class AuthService {
     // Select passwordHash explicitly — it is normally excluded via @Column select:false
     const user = await this.userRepo.findOne({
       where: { email: normalized },
-      select: ['id', 'email', 'passwordHash', 'status', 'deletedAt'],
+      select: ["id", "email", "passwordHash", "status", "deletedAt"],
     });
 
     // Use a constant-time comparison message to avoid leaking which field is wrong
-    const INVALID_MSG = 'INVALID_CREDENTIALS';
+    const INVALID_MSG = "INVALID_CREDENTIALS";
 
-    if (!user || user.status !== 'ACTIVE' || user.deletedAt) {
+    if (!user || user.status !== "ACTIVE" || user.deletedAt) {
       // Run a dummy compare to preserve timing parity
-      await bcrypt.compare(password, '$2a$12$dummydummydummydummydummydumm');
+      await bcrypt.compare(password, "$2a$12$dummydummydummydummydummydumm");
       throw new UnauthorizedException(INVALID_MSG);
     }
 
@@ -95,7 +95,7 @@ export class AuthService {
       .createQueryBuilder()
       .update(LoginOtpToken)
       .set({ usedAt: new Date() })
-      .where('userId = :userId AND usedAt IS NULL AND expiresAt > :now', {
+      .where("userId = :userId AND usedAt IS NULL AND expiresAt > :now", {
         userId: user.id,
         now: new Date(),
       })
@@ -141,14 +141,17 @@ export class AuthService {
     });
 
     if (!otpToken || otpToken.expiresAt <= now) {
-      throw new UnauthorizedException('INVALID_LOGIN_OTP');
+      throw new UnauthorizedException("INVALID_LOGIN_OTP");
     }
 
     // Check max attempts
     if (otpToken.attempts >= LOGIN_OTP_MAX_ATTEMPTS) {
       otpToken.usedAt = now;
       await this.otpTokenRepo.save(otpToken);
-      throw new HttpException('OTP_MAX_ATTEMPTS_EXCEEDED', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        "OTP_MAX_ATTEMPTS_EXCEEDED",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     // Validate the code
@@ -159,7 +162,7 @@ export class AuthService {
         otpToken.usedAt = now;
       }
       await this.otpTokenRepo.save(otpToken);
-      throw new UnauthorizedException('INVALID_LOGIN_OTP');
+      throw new UnauthorizedException("INVALID_LOGIN_OTP");
     }
 
     // Mark OTP as consumed
@@ -169,10 +172,10 @@ export class AuthService {
     // Load user with role + permissions
     const user = await this.userRepo.findOne({
       where: { id: otpToken.userId },
-      relations: ['role', 'role.permissions'],
+      relations: ["role", "role.permissions"],
     });
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== "ACTIVE") {
       throw new UnauthorizedException();
     }
 
@@ -218,13 +221,13 @@ export class AuthService {
     });
 
     if (!storedToken || storedToken.expiresAt <= new Date()) {
-      throw new UnauthorizedException('REFRESH_TOKEN_INVALID');
+      throw new UnauthorizedException("REFRESH_TOKEN_INVALID");
     }
 
     // Detect token reuse — if this token has already been replaced, revoke the whole family
     if (storedToken.replacedById) {
       await this.revokeFamilyTokens(storedToken.familyId);
-      throw new UnauthorizedException('REFRESH_TOKEN_REUSE_DETECTED');
+      throw new UnauthorizedException("REFRESH_TOKEN_REUSE_DETECTED");
     }
 
     // Rotate: revoke old, issue new in same family
@@ -247,10 +250,10 @@ export class AuthService {
 
     const user = await this.userRepo.findOne({
       where: { id: storedToken.userId },
-      relations: ['role', 'role.permissions'],
+      relations: ["role", "role.permissions"],
     });
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== "ACTIVE") {
       throw new UnauthorizedException();
     }
 
@@ -286,7 +289,7 @@ export class AuthService {
       .createQueryBuilder()
       .update(RefreshToken)
       .set({ revokedAt: new Date() })
-      .where('userId = :userId AND revokedAt IS NULL', { userId })
+      .where("userId = :userId AND revokedAt IS NULL", { userId })
       .execute();
 
     // Increment tokenVersion to invalidate all outstanding JWTs
@@ -294,7 +297,7 @@ export class AuthService {
       .createQueryBuilder()
       .update(User)
       .set({ tokenVersion: () => '"tokenVersion" + 1' })
-      .where('id = :id', { id: userId })
+      .where("id = :id", { id: userId })
       .execute();
 
     this.clearRefreshCookie(response);
@@ -308,18 +311,20 @@ export class AuthService {
     const user = await this.userRepo.findOne({ where: { email: normalized } });
 
     // Always respond 200 — never reveal whether the email exists
-    if (!user || user.status !== 'ACTIVE' || user.deletedAt) return;
+    if (!user || user.status !== "ACTIVE" || user.deletedAt) return;
 
     // Invalidate previous reset tokens
     await this.pwdResetTokenRepo
       .createQueryBuilder()
       .update(PasswordResetToken)
       .set({ usedAt: new Date() })
-      .where('userId = :userId AND usedAt IS NULL', { userId: user.id })
+      .where("userId = :userId AND usedAt IS NULL", { userId: user.id })
       .execute();
 
     const rawToken = generateSecureToken(32);
-    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+    const expiresAt = new Date(
+      Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
+    );
 
     const resetToken = this.pwdResetTokenRepo.create({
       userId: user.id,
@@ -328,7 +333,10 @@ export class AuthService {
     });
     await this.pwdResetTokenRepo.save(resetToken);
 
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    const frontendUrl = this.configService.get<string>(
+      "FRONTEND_URL",
+      "http://localhost:3000",
+    );
     const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
 
     try {
@@ -353,15 +361,17 @@ export class AuthService {
     });
 
     if (!resetToken || resetToken.expiresAt <= now) {
-      throw new UnauthorizedException('RESET_TOKEN_INVALID_OR_EXPIRED');
+      throw new UnauthorizedException("RESET_TOKEN_INVALID_OR_EXPIRED");
     }
 
     // Mark reset token as used
     resetToken.usedAt = now;
     await this.pwdResetTokenRepo.save(resetToken);
 
-    const user = await this.userRepo.findOne({ where: { id: resetToken.userId } });
-    if (!user) throw new NotFoundException('User not found');
+    const user = await this.userRepo.findOne({
+      where: { id: resetToken.userId },
+    });
+    if (!user) throw new NotFoundException("User not found");
 
     user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     await this.userRepo.save(user);
@@ -371,14 +381,14 @@ export class AuthService {
       .createQueryBuilder()
       .update(RefreshToken)
       .set({ revokedAt: now })
-      .where('userId = :userId AND revokedAt IS NULL', { userId: user.id })
+      .where("userId = :userId AND revokedAt IS NULL", { userId: user.id })
       .execute();
 
     await this.userRepo
       .createQueryBuilder()
       .update(User)
       .set({ tokenVersion: () => '"tokenVersion" + 1' })
-      .where('id = :id', { id: user.id })
+      .where("id = :id", { id: user.id })
       .execute();
   }
 
@@ -393,14 +403,17 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.userRepo.findOne({
       where: { id: userId },
-      select: ['id', 'passwordHash', 'status'],
+      select: ["id", "passwordHash", "status"],
     });
 
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException("User not found");
 
-    const passwordMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+    const passwordMatch = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash,
+    );
     if (!passwordMatch) {
-      throw new UnauthorizedException('CURRENT_PASSWORD_INCORRECT');
+      throw new UnauthorizedException("CURRENT_PASSWORD_INCORRECT");
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
@@ -419,7 +432,7 @@ export class AuthService {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
-      role: role?.code ?? '',
+      role: role?.code ?? "",
       permissions: permissionCodes,
       tokenVersion: user.tokenVersion,
       jti: randomUUID(),
@@ -430,23 +443,27 @@ export class AuthService {
 
   private setRefreshCookie(response: Response, rawToken: string): void {
     const maxAge =
-      this.configService.get<number>('JWT_REFRESH_TTL_DAYS', 30) * 24 * 60 * 60 * 1000;
+      this.configService.get<number>("JWT_REFRESH_TTL_DAYS", 30) *
+      24 *
+      60 *
+      60 *
+      1000;
 
     response.cookie(REFRESH_TOKEN_COOKIE, rawToken, {
       httpOnly: true,
-      secure: this.configService.get<string>('NODE_ENV') === 'production',
-      sameSite: 'strict',
-      path: '/',
+      secure: this.configService.get<string>("NODE_ENV") === "production",
+      sameSite: "strict",
+      path: "/",
       maxAge,
     });
   }
 
   private clearRefreshCookie(response: Response): void {
-    response.clearCookie(REFRESH_TOKEN_COOKIE, { path: '/' });
+    response.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/" });
   }
 
   private getOtpTtlMinutes(): number {
-    return this.configService.get<number>('LOGIN_OTP_TTL_MINUTES', 10);
+    return this.configService.get<number>("LOGIN_OTP_TTL_MINUTES", 10);
   }
 
   private resolveFamily(familyId?: string): string {
@@ -454,7 +471,7 @@ export class AuthService {
   }
 
   private buildRefreshExpiry(): Date {
-    const days = this.configService.get<number>('JWT_REFRESH_TTL_DAYS', 30);
+    const days = this.configService.get<number>("JWT_REFRESH_TTL_DAYS", 30);
     return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   }
 
@@ -463,7 +480,7 @@ export class AuthService {
       .createQueryBuilder()
       .update(RefreshToken)
       .set({ revokedAt: new Date() })
-      .where('familyId = :familyId AND revokedAt IS NULL', { familyId })
+      .where("familyId = :familyId AND revokedAt IS NULL", { familyId })
       .execute();
   }
 }

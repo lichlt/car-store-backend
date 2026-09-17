@@ -23,3 +23,7 @@ export function uploadToCloudinary(
     stream.end(buffer);
   });
 }
+
+export function deleteFromCloudinary(publicId: string): Promise<{ result: string }> {
+  return cloudinary.uploader.destroy(publicId);
+}

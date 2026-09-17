@@ -12,14 +12,14 @@ import { HealthModule } from "./modules/health/health.module";
  */
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
-// import { CatalogModule } from './modules/catalog/catalog.module';
-// import { CarsModule } from './modules/cars/cars.module';
-// import { LeadsModule } from './modules/leads/leads.module';
-// import { InquiriesModule } from './modules/inquiries/inquiries.module';
-// import { CmsModule } from './modules/cms/cms.module';
-// import { DashboardModule } from './modules/dashboard/dashboard.module';
-// import { ReportsModule } from './modules/reports/reports.module';
-// import { AuditModule } from './modules/audit/audit.module';
+import { CatalogModule } from "./modules/catalog/catalog.module";
+import { CarsModule } from "./modules/cars/cars.module";
+import { LeadsModule } from './modules/leads/leads.module';
+import { InquiriesModule } from './modules/inquiries/inquiries.module';
+import { CmsModule } from './modules/cms/cms.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { AuditModule } from './modules/audit/audit.module';
 
 @Module({
   imports: [
@@ -37,14 +37,14 @@ import { UsersModule } from "./modules/users/users.module";
     HealthModule,
     AuthModule,
     UsersModule,
-    // CatalogModule,
-    // CarsModule,
-    // LeadsModule,
-    // InquiriesModule,
-    // CmsModule,
-    // DashboardModule,
-    // ReportsModule,
-    // AuditModule,
+    CatalogModule,
+    CarsModule,
+    LeadsModule,
+    InquiriesModule,
+    CmsModule,
+    DashboardModule,
+    ReportsModule,
+    AuditModule,
   ],
 })
 export class AppModule {}
