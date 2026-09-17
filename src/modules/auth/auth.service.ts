@@ -1,51 +1,89 @@
 import {
   Injectable,
   UnauthorizedException,
-  ConflictException,
-  NotFoundException,
   HttpException,
   HttpStatus,
-  Optional,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
-import { JwtService } from "@nestjs/jwt";
-import { Repository, IsNull, LessThan, Not } from "typeorm";
-import { Response } from "express";
-import { randomUUID } from "crypto";
-import * as bcrypt from "bcryptjs";
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, IsNull, MoreThan } from 'typeorm';
+import { Response } from 'express';
+import * as bcrypt from 'bcryptjs';
 
-import { User, UserStatus } from "../users/entities/user.entity";
-import { Role } from "../users/entities/role.entity";
-import { LoginOtpToken } from "./entities/login-otp-token.entity";
-import { PasswordResetToken } from "./entities/password-reset-token.entity";
-import { JwtPayload } from "../../common/types/jwt-payload.interface";
-import { MailService } from "./mail.service";
+import { User, UserStatus } from '../users/entities/user.entity';
+import { Role } from '../users/entities/role.entity';
+import { LoginOtpToken } from './entities/login-otp-token.entity';
+import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { MailService } from './mail.service';
 import {
   hashToken,
   generateOtp,
   generateSecureToken,
   normalizeEmail,
-} from "../../common/utils/crypto.utils";
-import { REFRESH_TOKEN_COOKIE } from "../../common/constants/app.constants";
-import { MolTokenService, MOL_TOKEN_COOKIE } from "./mol-token.service";
-import { RedisService } from "../redis/redis.service";
+} from '../../common/utils/crypto.utils';
+import { MolTokenService, MOL_TOKEN_COOKIE } from './mol-token.service';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────────────────────────────────────
-const BCRYPT_ROUNDS = 12;
 const LOGIN_OTP_MAX_ATTEMPTS = 5;
 const PASSWORD_RESET_TTL_MINUTES = 30;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AuthService
-// ──────────────────────────────────────────────────────────────────────────────
+export function serializeAdmin(user: User): Record<string, unknown> {
+  const {
+    passwordHash: _p,
+    tokenVersion: _t,
+    deletedAt: _d,
+    ...rest
+  } = user as any;
+  return rest;
+}
+
+export function setMOLTokenCookie(
+  res: Response,
+  token: string,
+  configService: ConfigService,
+): void {
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+  const durationSeconds =
+    configService.get<number>('MOL_TOKEN_DURATION_SECONDS') ?? 600;
+  const cookieDomain = configService.get<string>('COOKIE_DOMAIN');
+  res.cookie(MOL_TOKEN_COOKIE, token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    domain: cookieDomain || undefined,
+    path: '/api',
+    maxAge: durationSeconds * 1000,
+  });
+}
+
+export function clearMOLTokenCookie(
+  res: Response,
+  configService: ConfigService,
+): void {
+  const cookieDomain = configService.get<string>('COOKIE_DOMAIN');
+  res.cookie(MOL_TOKEN_COOKIE, '', {
+    httpOnly: true,
+    path: '/api',
+    domain: cookieDomain || undefined,
+    maxAge: 0,
+  });
+}
+
+export interface SessionResult {
+  admin: Record<string, unknown>;
+  role: string;
+  permissions: string[];
+  molToken: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+
+    @InjectRepository(Role)
+    private readonly roleRepo: Repository<Role>,
 
     @InjectRepository(LoginOtpToken)
     private readonly otpTokenRepo: Repository<LoginOtpToken>,
@@ -53,16 +91,17 @@ export class AuthService {
     @InjectRepository(PasswordResetToken)
     private readonly pwdResetTokenRepo: Repository<PasswordResetToken>,
 
-    private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
-    private readonly redisService: RedisService,
-    @Optional()
-    private readonly molTokenService?: MolTokenService,
+    private readonly molTokenService: MolTokenService,
   ) {}
 
+  private getOtpTtlMinutes(): number {
+    return this.configService.get<number>('LOGIN_OTP_TTL_MINUTES', 10);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
-  // 1. Request OTP (step 1 of login)
+  // 1. Request Login OTP
   // ─────────────────────────────────────────────────────────────────────────
   async requestLoginOtp(
     email: string,
@@ -70,25 +109,23 @@ export class AuthService {
   ): Promise<{ challengeId: string; expiresAt: Date }> {
     const normalized = normalizeEmail(email);
 
-    // Explicitly select passwordHash since it has select: false
     const user = await this.userRepo
-      .createQueryBuilder("user")
-      .addSelect("user.passwordHash")
-      .where("user.email = :email", { email: normalized })
-      .andWhere("user.deletedAt IS NULL")
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.email = :email', { email: normalized })
+      .andWhere('user.deletedAt IS NULL')
       .getOne();
 
-    // Constant-time check to prevent timing attacks
     const dummyHash =
-      "$2a$12$e8k8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT";
+      '$2a$12$e8k8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT';
     const hashToCompare = user?.passwordHash ?? dummyHash;
     const passwordMatch = await bcrypt.compare(password, hashToCompare);
 
-    if (!user || !passwordMatch || user.status !== "ACTIVE") {
-      throw new UnauthorizedException("INVALID_CREDENTIALS");
+    if (!user || !passwordMatch || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Invalid email or password');
     }
 
-    // Invalidate any existing active OTP challenges for this user
+    // Invalidate active OTPs for this user
     await this.otpTokenRepo.update(
       { userId: user.id, usedAt: IsNull() },
       { usedAt: new Date() },
@@ -106,28 +143,22 @@ export class AuthService {
     });
     const saved = await this.otpTokenRepo.save(challenge);
 
-    // Send email asynchronously; don't block the HTTP response if mail fails
-    this.mailService
-      .sendLoginOtp(user.email, otp, user.fullName)
-      .catch((err) => {
-        // Log in production; do not expose internal mail errors to user
-        console.error("Failed to send OTP email:", err);
-      });
+    this.mailService.sendLoginOtp(user.email, otp, user.fullName).catch((err) => {
+      console.error('Failed to send OTP email:', err);
+    });
 
     return { challengeId: saved.id, expiresAt: saved.expiresAt };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 2. Verify OTP (step 2 of login)
+  // 2. Verify Login OTP & Issue MOLToken
   // ─────────────────────────────────────────────────────────────────────────
   async verifyLoginOtp(
     challengeId: string,
     otp: string,
     deviceId: string,
-    ipAddress: string,
-    userAgent: string,
-    response: Response,
-  ): Promise<{ accessToken: string; molToken?: string }> {
+    res?: Response,
+  ): Promise<SessionResult> {
     const now = new Date();
 
     const otpToken = await this.otpTokenRepo.findOne({
@@ -138,402 +169,265 @@ export class AuthService {
     });
 
     if (!otpToken) {
-      throw new UnauthorizedException("LOGIN_OTP_NOT_FOUND");
+      throw new UnauthorizedException('Login code is invalid or expired');
     }
 
     if (otpToken.expiresAt <= now) {
-      throw new UnauthorizedException("LOGIN_OTP_EXPIRED");
+      throw new UnauthorizedException('Login code is invalid or expired');
     }
 
     if (otpToken.attempts >= LOGIN_OTP_MAX_ATTEMPTS) {
-      // Mark as used to prevent further attempts
       otpToken.usedAt = now;
       await this.otpTokenRepo.save(otpToken);
       throw new HttpException(
-        "LOGIN_OTP_ATTEMPTS_EXCEEDED",
+        'Too many invalid login code attempts',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    const inputHash = hashToken(otp.trim());
-    if (inputHash !== otpToken.codeHash) {
-      otpToken.attempts += 1;
-      await this.otpTokenRepo.save(otpToken);
-
-      const remaining = LOGIN_OTP_MAX_ATTEMPTS - otpToken.attempts;
-      if (remaining <= 0) {
-        otpToken.usedAt = now;
-        await this.otpTokenRepo.save(otpToken);
-        throw new HttpException(
-          "LOGIN_OTP_ATTEMPTS_EXCEEDED",
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw new UnauthorizedException(`INVALID_OTP_${remaining}_ATTEMPTS_LEFT`);
+    const codeHash = hashToken(otp);
+    if (codeHash !== otpToken.codeHash) {
+      await this.otpTokenRepo.increment({ id: otpToken.id }, 'attempts', 1);
+      throw new UnauthorizedException('Login code is invalid or expired');
     }
 
-    // OTP is valid — mark as used
+    // Mark challenge as used
     otpToken.usedAt = now;
     await this.otpTokenRepo.save(otpToken);
 
-    // Load user with role + permissions
-    const user = await this.userRepo.findOne({
-      where: { id: otpToken.userId },
-      relations: ["role", "role.permissions"],
-    });
+    // Load full user with role and permissions
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('role.permissions', 'permission')
+      .addSelect('user.tokenVersion')
+      .where('user.id = :id', { id: otpToken.userId })
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
 
-    if (!user || user.status !== "ACTIVE") {
-      throw new UnauthorizedException();
+    if (!user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Admin is inactive or no longer exists');
     }
 
     // Update lastLoginAt
-    user.lastLoginAt = now;
-    await this.userRepo.save(user);
+    await this.userRepo.update(user.id, { lastLoginAt: now });
 
-    // Issue refresh token in Redis (Pure Redis Session)
-    const rawRefresh = generateSecureToken(32);
-    const tokenHash = hashToken(rawRefresh);
-    const ttlSeconds = this.getRefreshTtlSeconds();
+    const roleCode = user.role?.code ?? 'VIEWER';
+    const permissions = user.role?.permissions
+      ? user.role.permissions.map((p) => p.code)
+      : [];
 
-    const sessionPayload = {
-      userId: user.id,
+    // Issue MOLToken
+    const molToken = await this.molTokenService.issue(
+      {
+        audience: 'admin',
+        userId: user.id,
+        roleCode,
+        permissions,
+        tokenVersion: user.tokenVersion,
+      },
       deviceId,
-      userAgent,
-      createdAt: now.toISOString(),
-    };
-
-    await this.redisService.set(
-      `refresh:${tokenHash}`,
-      JSON.stringify(sessionPayload),
-      ttlSeconds,
-    );
-    await this.redisService.set(
-      `user_refresh:${user.id}:${tokenHash}`,
-      "1",
-      ttlSeconds,
     );
 
-    this.setRefreshCookie(response, rawRefresh);
-
-    let molToken: string | undefined;
-    if (this.molTokenService) {
-      molToken = await this.molTokenService.issue(
-        {
-          audience: "admin",
-          userId: user.id,
-          roleCode: user.role?.code ?? "VIEWER",
-          permissions: user.role?.permissions?.map((p) => p.code) ?? [],
-          tokenVersion: user.tokenVersion,
-        },
-        deviceId,
-      );
-
-      const cookieDomain = this.configService.get<string>("COOKIE_DOMAIN");
-      const durationSec =
-        this.configService.get<number>("MOL_TOKEN_DURATION_SECONDS") ?? 600;
-      response.cookie(MOL_TOKEN_COOKIE, molToken, {
-        httpOnly: true,
-        secure: this.configService.get<string>("NODE_ENV") === "production",
-        sameSite: "strict",
-        domain:
-          cookieDomain && cookieDomain !== "localhost"
-            ? cookieDomain
-            : undefined,
-        maxAge: durationSec * 1000,
-      });
+    if (res) {
+      setMOLTokenCookie(res, molToken, this.configService);
     }
 
-    const accessToken = this.buildJwt(user, user.role);
     return {
-      accessToken,
-      ...(molToken ? { molToken } : {}),
+      admin: serializeAdmin(user),
+      role: roleCode,
+      permissions,
+      molToken,
     };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 3. Refresh Access Token (via Redis)
+  // 3. Resend Login OTP
   // ─────────────────────────────────────────────────────────────────────────
-  async refreshAccessToken(
-    refreshTokenCookie: string,
-    deviceId: string,
-    userAgent: string,
-    response: Response,
-  ): Promise<{ accessToken: string }> {
-    const tokenHash = hashToken(refreshTokenCookie);
-    const sessionRaw = await this.redisService.get(`refresh:${tokenHash}`);
+  async resendLoginOtp(
+    challengeId: string,
+  ): Promise<{ challengeId: string; expiresAt: Date }> {
+    const previous = await this.otpTokenRepo.findOne({
+      where: { id: challengeId },
+    });
 
-    if (!sessionRaw) {
-      throw new UnauthorizedException("REFRESH_TOKEN_INVALID");
+    if (!previous) {
+      throw new UnauthorizedException('Login code is invalid or expired');
     }
-
-    let session: { userId: string; deviceId: string; userAgent: string };
-    try {
-      session = JSON.parse(sessionRaw);
-    } catch {
-      throw new UnauthorizedException("REFRESH_TOKEN_INVALID");
-    }
-
-    // Token Rotation: Invalidate old token in Redis
-    await this.redisService.del(`refresh:${tokenHash}`);
-    await this.redisService.del(`user_refresh:${session.userId}:${tokenHash}`);
-
-    // Generate new refresh token in Redis
-    const rawNewRefresh = generateSecureToken(32);
-    const newTokenHash = hashToken(rawNewRefresh);
-    const ttlSeconds = this.getRefreshTtlSeconds();
-
-    const newSessionPayload = {
-      userId: session.userId,
-      deviceId,
-      userAgent,
-      createdAt: new Date().toISOString(),
-    };
-
-    await this.redisService.set(
-      `refresh:${newTokenHash}`,
-      JSON.stringify(newSessionPayload),
-      ttlSeconds,
-    );
-    await this.redisService.set(
-      `user_refresh:${session.userId}:${newTokenHash}`,
-      "1",
-      ttlSeconds,
-    );
 
     const user = await this.userRepo.findOne({
-      where: { id: session.userId },
-      relations: ["role", "role.permissions"],
+      where: { id: previous.userId, status: UserStatus.ACTIVE, deletedAt: IsNull() },
     });
 
-    if (!user || user.status !== "ACTIVE") {
-      throw new UnauthorizedException();
+    if (!user) {
+      throw new UnauthorizedException('Admin is inactive or no longer exists');
     }
 
-    this.setRefreshCookie(response, rawNewRefresh);
+    // Invalidate previous challenge
+    previous.usedAt = new Date();
+    await this.otpTokenRepo.save(previous);
 
-    const accessToken = this.buildJwt(user, user.role);
-    return { accessToken };
+    const otp = generateOtp();
+    const codeHash = hashToken(otp);
+    const ttlMinutes = this.getOtpTtlMinutes();
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+    const nextChallenge = this.otpTokenRepo.create({
+      userId: user.id,
+      codeHash,
+      expiresAt,
+    });
+    const saved = await this.otpTokenRepo.save(nextChallenge);
+
+    this.mailService.sendLoginOtp(user.email, otp, user.fullName).catch((err) => {
+      console.error('Failed to resend OTP email:', err);
+    });
+
+    return { challengeId: saved.id, expiresAt: saved.expiresAt };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 4. Logout (single device)
+  // 4. Revoke Sessions (Logout All)
   // ─────────────────────────────────────────────────────────────────────────
-  async logout(refreshTokenCookie: string, response: Response): Promise<void> {
-    const tokenHash = hashToken(refreshTokenCookie);
-    const sessionRaw = await this.redisService.get(`refresh:${tokenHash}`);
-    if (sessionRaw) {
-      try {
-        const session = JSON.parse(sessionRaw) as { userId: string };
-        await this.redisService.del(
-          `user_refresh:${session.userId}:${tokenHash}`,
-        );
-      } catch {}
-      await this.redisService.del(`refresh:${tokenHash}`);
-    }
-
-    this.clearRefreshCookie(response);
-
-    const cookieDomain = this.configService.get<string>("COOKIE_DOMAIN");
-    response.clearCookie(MOL_TOKEN_COOKIE, {
-      domain:
-        cookieDomain && cookieDomain !== "localhost" ? cookieDomain : undefined,
-    });
+  async revokeAllAdminSessions(userId: string): Promise<void> {
+    await Promise.all([
+      this.molTokenService.revokeAll('admin', userId),
+      this.userRepo.increment({ id: userId }, 'tokenVersion', 1),
+    ]);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 5. Logout All Devices
+  // 5. Change Password
   // ─────────────────────────────────────────────────────────────────────────
-  async logoutAll(userId: string, response: Response): Promise<void> {
-    // Revoke all Redis refresh tokens for this user
-    const stream = this.redisService.scanStream({
-      match: `user_refresh:${userId}:*`,
-      count: 100,
-    });
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.id = :id', { id: userId })
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
 
-    for await (const resultKeys of stream) {
-      const keys = resultKeys as string[];
-      for (const userKey of keys) {
-        const tokenHash = userKey.replace(`user_refresh:${userId}:`, "");
-        await this.redisService.del(`refresh:${tokenHash}`, userKey);
-      }
+    if (!user || !(await user.comparePassword(currentPassword))) {
+      throw new UnauthorizedException('Current password is incorrect');
     }
 
-    // Revoke all MOLToken Redis sessions
-    if (this.molTokenService) {
-      await this.molTokenService.revokeAll("admin", userId);
-    }
-
-    // Invalidate access tokens by bumping tokenVersion
-    await this.userRepo
-      .createQueryBuilder()
-      .update(User)
-      .set({ tokenVersion: () => "token_version + 1" })
-      .where("id = :userId", { userId })
-      .execute();
-
-    this.clearRefreshCookie(response);
-
-    const cookieDomain = this.configService.get<string>("COOKIE_DOMAIN");
-    response.clearCookie(MOL_TOKEN_COOKIE, {
-      domain:
-        cookieDomain && cookieDomain !== "localhost" ? cookieDomain : undefined,
-    });
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.userRepo.save(user);
+    await this.revokeAllAdminSessions(user.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // 6. Request Password Reset
   // ─────────────────────────────────────────────────────────────────────────
   async requestPasswordReset(email: string): Promise<void> {
-    const normalized = normalizeEmail(email);
     const user = await this.userRepo.findOne({
-      where: { email: normalized, status: UserStatus.ACTIVE },
+      where: {
+        email: normalizeEmail(email),
+        status: UserStatus.ACTIVE,
+        deletedAt: IsNull(),
+      },
     });
 
-    // Don't reveal whether the user exists
     if (!user) return;
 
-    // Invalidate existing reset tokens
     await this.pwdResetTokenRepo.update(
       { userId: user.id, usedAt: IsNull() },
       { usedAt: new Date() },
     );
 
-    const rawToken = generateSecureToken(32);
-    const tokenHash = hashToken(rawToken);
-    const expiresAt = new Date(
-      Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
-    );
-
-    const resetToken = this.pwdResetTokenRepo.create({
+    const raw = generateSecureToken(32);
+    const token = this.pwdResetTokenRepo.create({
       userId: user.id,
-      tokenHash,
-      expiresAt,
+      tokenHash: hashToken(raw),
+      expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
     });
-    await this.pwdResetTokenRepo.save(resetToken);
+    await this.pwdResetTokenRepo.save(token);
 
-    const frontendUrl =
-      this.configService.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
-    const resetUrl = `${frontendUrl}/admin/reset-password?token=${rawToken}`;
-
-    await this.mailService.sendPasswordReset(
-      user.email,
-      resetUrl,
-      user.fullName,
+    const frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:3000',
     );
+    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(raw)}`;
+
+    this.mailService
+      .sendPasswordReset(user.email, resetUrl, user.fullName)
+      .catch((err) => {
+        console.error('Password reset email delivery failed:', err);
+      });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // 7. Reset Password
   // ─────────────────────────────────────────────────────────────────────────
-  async resetPassword(
-    rawToken: string,
-    newPassword: string,
-    response: Response,
-  ): Promise<void> {
+  async resetPassword(rawToken: string, newPassword: string): Promise<void> {
     const tokenHash = hashToken(rawToken);
-    const now = new Date();
-
-    const resetToken = await this.pwdResetTokenRepo.findOne({
-      where: { tokenHash, usedAt: IsNull() },
+    const token = await this.pwdResetTokenRepo.findOne({
+      where: {
+        tokenHash,
+        usedAt: IsNull(),
+        expiresAt: MoreThan(new Date()),
+      },
     });
 
-    if (!resetToken || resetToken.expiresAt <= now) {
-      throw new UnauthorizedException("PASSWORD_RESET_TOKEN_INVALID");
+    if (!token) {
+      throw new HttpException(
+        'Password reset token is invalid or expired',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
     }
 
-    const user = await this.userRepo.findOne({
-      where: { id: resetToken.userId },
-    });
-    if (!user || user.status !== "ACTIVE") {
-      throw new UnauthorizedException();
-    }
+    token.usedAt = new Date();
+    await this.pwdResetTokenRepo.save(token);
 
-    // Hash and save new password
-    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    await this.userRepo.save(user);
-
-    // Invalidate reset token
-    resetToken.usedAt = now;
-    await this.pwdResetTokenRepo.save(resetToken);
-
-    // Revoke all sessions
-    await this.logoutAll(user.id, response);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // 8. Change Password (authenticated user)
-  // ─────────────────────────────────────────────────────────────────────────
-  async changePassword(
-    userId: string,
-    currentPassword: string,
-    newPassword: string,
-    response: Response,
-  ): Promise<void> {
     const user = await this.userRepo
-      .createQueryBuilder("user")
-      .addSelect("user.passwordHash")
-      .where("user.id = :userId", { userId })
-      .andWhere("user.deletedAt IS NULL")
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.id = :id', { id: token.userId })
+      .andWhere('user.deletedAt IS NULL')
       .getOne();
 
-    if (!user) throw new NotFoundException("User not found");
-
-    const passwordMatch = await bcrypt.compare(
-      currentPassword,
-      user.passwordHash,
-    );
-    if (!passwordMatch) {
-      throw new UnauthorizedException("CURRENT_PASSWORD_INCORRECT");
+    if (!user || user.status !== 'ACTIVE') {
+      throw new HttpException(
+        'Password reset token is invalid',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
     }
 
-    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
     await this.userRepo.save(user);
-
-    await this.logoutAll(userId, response);
+    await this.revokeAllAdminSessions(user.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Private helpers
+  // 8. Authorization & Admin Retrieval Helpers
   // ─────────────────────────────────────────────────────────────────────────
+  async getAdminById(id: string): Promise<User> {
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('role.permissions', 'permission')
+      .where('user.id = :id', { id })
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
 
-  private buildJwt(user: User, role: Role): string {
-    const permissionCodes = (role?.permissions ?? []).map((p) => p.code);
+    if (!user) {
+      throw new NotFoundException('Admin not found');
+    }
 
-    const payload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      role: role?.code ?? "",
-      permissions: permissionCodes,
-      tokenVersion: user.tokenVersion,
-      jti: randomUUID(),
-    };
-
-    return this.jwtService.sign(payload);
+    return user;
   }
 
-  private setRefreshCookie(response: Response, rawToken: string): void {
-    const days = this.configService.get<number>("REFRESH_TOKEN_TTL_DAYS", 7);
-    const maxAge = days * 24 * 60 * 60 * 1000;
-
-    response.cookie(REFRESH_TOKEN_COOKIE, rawToken, {
-      httpOnly: true,
-      secure: this.configService.get<string>("NODE_ENV") === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge,
-    });
-  }
-
-  private clearRefreshCookie(response: Response): void {
-    response.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/" });
-  }
-
-  private getOtpTtlMinutes(): number {
-    return this.configService.get<number>("LOGIN_OTP_TTL_MINUTES", 10);
-  }
-
-  private getRefreshTtlSeconds(): number {
-    const days = this.configService.get<number>("REFRESH_TOKEN_TTL_DAYS", 7);
-    return days * 24 * 60 * 60;
+  async resolveAuthorization(
+    user: User,
+  ): Promise<{ roleCode: string; permissions: string[] }> {
+    const roleCode = user.role?.code ?? 'VIEWER';
+    const permissions = user.role?.permissions
+      ? user.role.permissions.map((p) => p.code)
+      : [];
+    return { roleCode, permissions };
   }
 }

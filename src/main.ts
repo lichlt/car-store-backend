@@ -9,7 +9,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
-import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { MolAuthGuard } from './common/guards/mol-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 
 async function bootstrap(): Promise<void> {
@@ -56,7 +56,7 @@ async function bootstrap(): Promise<void> {
 
   // ── Global guards ─────────────────────────────────────────────────────────
   app.useGlobalGuards(
-    new JwtAuthGuard(reflector),
+    app.get(MolAuthGuard),
     new PermissionsGuard(reflector),
   );
 
@@ -66,8 +66,8 @@ async function bootstrap(): Promise<void> {
       .setTitle('Carstore Admin API')
       .setDescription('REST API for Carstore Admin Dashboard')
       .setVersion('1.0')
-      .addBearerAuth()
-      .addCookieAuth('refresh_token')
+      .addApiKey({ type: 'apiKey', name: 'Authorization', in: 'header' }, 'MOLToken')
+      .addCookieAuth('MOLToken')
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

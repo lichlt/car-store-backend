@@ -1,20 +1,27 @@
 # Quy trình Đăng nhập & Quản lý Phiên (Authentication & Session Flow)
 
 > **Tài liệu kỹ thuật hệ thống Carstore Backend (NestJS + PostgreSQL + Redis)**  
-> **Phiên bản:** 2.0 (Pure Redis Session & Token Management)  
-> **Áp dụng cho:** `car-store-backend` (và tương thích hoàn toàn với `car-store-web`)
+> **Phiên bản:** 3.0 (Pure MOLToken AES-256-GCM + In-Memory Redis Session)  
+> **Áp dụng cho:** `car-store-backend` (đồng bộ hoàn toàn với `car-store-api` và frontend `car-store-web`)
 
 ---
 
 ## 1. Tổng quan kiến trúc xác thực
 
-Hệ thống sử dụng cơ chế **Xác thực 2 bước (Two-Factor Authentication / OTP Login)** kết hợp **Dual-Token & Pure Redis Session Cache**:
+Hệ thống sử dụng cơ chế **Xác thực 2 bước (Two-Factor Authentication / OTP Login)** kết hợp **MOLToken Session** mã hóa đối xứng AES-256-GCM và lưu trạng thái phiên hoạt động trên **Redis Cache**:
+
+- **Không sử dụng JWT Access Token** và **Không sử dụng Refresh Token** truyền thống.
+- **Duy nhất 1 loại Token phiên:** `MOLToken` được mã hóa đối xứng AES-256-GCM.
+- **Bảo mật kép:** Trình duyệt lưu `MOLToken` trong **HttpOnly Cookie** (hoặc gửi qua header `Authorization: MOLToken <token>`), đồng thời Redis lưu trữ trạng thái phiên hoạt động với TTL 600 giây (10 phút).
+- **Hỗ trợ đa đường dẫn (Dual Routing):** Hỗ trợ cả 2 chuẩn gọi API:
+  - Chuẩn gốc của `car-store-web`: `/api/login`, `/api/verify-login-otp`, `/api/refresh-token`, v.v.
+  - Chuẩn module NestJS: `/api/auth/login`, `/api/auth/verify-otp`, `/api/auth/refresh`, v.v.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Admin as Người dùng (Admin)
-    participant Web as Frontend (Web App)
+    participant Web as Frontend (car-store-web)
     participant API as Backend (NestJS)
     participant DB as PostgreSQL
     participant Redis as Redis Cache
@@ -23,30 +30,29 @@ sequenceDiagram
     %% BƯỚC 1: REQUEST OTP
     Note over Admin,Mail: BƯỚC 1: Xác thực Email & Password -> Nhận OTP
     Admin->>Web: Nhập email & password
-    Web->>API: POST /api/auth/login { email, password }
+    Web->>API: POST /api/login { email, password }
     API->>DB: Tìm User (email, status = ACTIVE) & passwordHash
     API->>API: bcrypt.compare(password, passwordHash)
     API->>DB: Huỷ các OTP challenge cũ (used_at = NOW)
     API->>API: Sinh OTP 6 số ngẫu nhiên
     API->>DB: Lưu SHA-256 hash của OTP vào login_otp_tokens (TTL: 10m)
     API-->>Mail: Gửi email chứa OTP đến hòm thư Admin
-    API-->>Web: Trả về 200 { challengeId, expiresAt }
+    API-->>Web: Trả về HTTP 202 { challengeId, expiresAt }
     Web-->>Admin: Hiển thị màn hình nhập OTP
 
     %% BƯỚC 2: VERIFY OTP
-    Note over Admin,Redis: BƯỚC 2: Xác thực OTP -> Cấp quyền & Khởi tạo phiên
+    Note over Admin,Redis: BƯỚC 2: Xác thực OTP -> Khởi tạo phiên MOLToken
     Admin->>Web: Nhập mã OTP 6 số
-    Web->>API: POST /api/auth/verify-otp { challengeId, otp } (Header: x-device-id)
+    Web->>API: POST /api/verify-login-otp { challengeId, otp } (Header: x-device-id)
     API->>DB: Tìm challenge trong login_otp_tokens
     API->>API: Kiểm tra attempts < 5 & so sánh hashToken(otp)
     API->>DB: Đánh dấu used_at = NOW, update last_login_at
     API->>DB: Load User kèm Role và danh sách Permissions
 
-    %% Khởi tạo Tokens & Redis
-    API->>Redis: Lưu Refresh Token: refresh:{hash} & user_refresh:{userId}:{hash} (TTL: 7d)
+    %% Khởi tạo MOLToken & Redis Session
+    API->>API: Mã hoá AES-256-GCM payload tạo molToken
     API->>Redis: Lưu Active Session: mol:session:admin:{userId}:{deviceId} (TTL: 600s)
-    API->>API: Ký JWT Access Token (hạn 15m, chứa sub, role, permissions, tokenVersion)
-    API-->>Web: Trả về { accessToken, molToken }<br/>Set HttpOnly Cookies: "refresh_token" (7d) & "MOLToken" (10m)
+    API-->>Web: Trả về { admin, role, permissions, molToken }<br/>Set HttpOnly Cookie: "MOLToken" (10m)
     Web-->>Admin: Đăng nhập thành công, chuyển hướng vào Dashboard
 ```
 
@@ -54,12 +60,12 @@ sequenceDiagram
 
 ## 2. Chi tiết từng bước & API Endpoints
 
-### Bước 1: Yêu cầu mã OTP (`POST /api/auth/login`)
+### Bước 1: Yêu cầu mã OTP (`POST /api/login`)
 
-- **Mục đích:** Kiểm tra thông tin đăng nhập ban đầu và phát hành mã OTP qua email.
+- **Mục đích:** Xác thực email & password ban đầu, sau đó phát hành mã OTP qua email.
 - **Request:**
   ```http
-  POST /api/auth/login
+  POST /api/login
   Content-Type: application/json
 
   {
@@ -72,14 +78,14 @@ sequenceDiagram
   2. Truy vấn tài khoản trong bảng `users`:
      - Kiểm tra `status === 'ACTIVE'` và `deleted_at IS NULL`.
      - So sánh mật khẩu bằng `bcrypt.compare(password, user.passwordHash)`.
-     - _Bảo mật Timing Attack:_ Nếu email không tồn tại hoặc sai mật khẩu, hệ thống đều trả về lỗi chung `401 INVALID_CREDENTIALS` (không làm lộ việc email có tồn tại hay không).
+     - _Bảo mật Timing Attack:_ Nếu email không tồn tại hoặc sai mật khẩu, hệ thống đều trả về lỗi chung `401 INVALID_CREDENTIALS` (hoặc `Invalid email or password`).
   3. Huỷ toàn bộ OTP challenge đang hoạt động trước đó của user (`used_at = NOW()`).
   4. Sinh mã OTP ngẫu nhiên 6 chữ số (từ `100000` đến `999999`).
   5. Tính mã băm `code_hash = SHA256(otp)` và lưu vào bảng `login_otp_tokens`:
      - `expires_at = NOW() + LOGIN_OTP_TTL_MINUTES` (mặc định 10 phút).
      - `attempts = 0`.
   6. Gửi email chứa mã OTP thông qua `MailService` (SMTP Gmail).
-- **Response thành công (HTTP 200 / 202):**
+- **Response thành công (HTTP 202 Accepted):**
   ```json
   {
     "data": {
@@ -92,12 +98,12 @@ sequenceDiagram
 
 ---
 
-### Bước 2: Xác thực mã OTP (`POST /api/auth/verify-otp`)
+### Bước 2: Xác thực mã OTP (`POST /api/verify-login-otp`)
 
-- **Mục đích:** Kiểm tra mã OTP, cấp JWT Access Token và lưu trữ Refresh Token cùng Session 100% trên Redis.
+- **Mục đích:** Kiểm tra mã OTP, tạo phiên mã hóa `MOLToken`, lưu session vào Redis và thiết lập cookie.
 - **Request:**
   ```http
-  POST /api/auth/verify-otp
+  POST /api/verify-login-otp
   Content-Type: application/json
   x-device-id: 8f9b4c2e-1234-5678-abcd-ef0123456789 (optional)
 
@@ -117,135 +123,163 @@ sequenceDiagram
   4. Khi mã OTP chính xác:
      - Đánh dấu `used_at = NOW()`.
      - Cập nhật `last_login_at = NOW()` trên bảng `users`.
-     - Tải thông tin Role và danh sách Permissions hiệu lực của Admin.
-  5. **Cấp phát 3 lớp Token & Session:**
-     - **Lớp 1 — Redis Refresh Token (Lưu trữ thuần in-memory trên Redis):**
-       - Sinh mã ngẫu nhiên 32 bytes (`rawToken`).
-       - Băm SHA-256: `tokenHash = hashToken(rawToken)`.
-       - Lưu vào **Redis** key `refresh:${tokenHash}` với payload:
-         ```json
-         {
-           "userId": "user-uuid",
-           "deviceId": "device-uuid",
-           "userAgent": "Mozilla/5.0...",
-           "createdAt": "2026-09-17T15:00:00.000Z"
-         }
-         ```
-         TTL: 7 ngày (`REFRESH_TOKEN_TTL_DAYS * 86400`).
-       - Lưu index key phụ `user_refresh:${userId}:${tokenHash}` với TTL tương tự (phục vụ thu hồi hàng loạt khi đăng xuất tất cả thiết bị).
-       - Không ghi bảng vào PostgreSQL $\rightarrow$ Không tạo rác database, tốc độ đọc/ghi cực nhanh.
-       - Gửi về client qua **HttpOnly Cookie** `refresh_token` (hạn 7 ngày, `SameSite=Strict`, `Path=/api/auth`).
-     - **Lớp 2 — Redis MOL Session:**
-       - Mã hoá payload phiên bằng thuật toán **AES-256-GCM** (sử dụng `MOL_TOKEN_ENCRYPTION_SECRET`):
-         `{ audience: "admin", userId, roleCode, permissions, deviceId, tokenVersion, timestamp }`.
-       - Lưu vào **Redis** key: `mol:session:admin:{userId}:{deviceId}` với data `{ deviceId, tokenHash }`, TTL 600 giây (10 phút).
-       - Gửi về client qua **HttpOnly Cookie** `MOLToken`.
-     - **Lớp 3 — JWT Access Token:**
-       - Ký JWT ngắn hạn (15 phút) chứa `{ sub, email, role, permissions, tokenVersion, jti }`.
-- **Response thành công (HTTP 200):**
+     - Tải thông tin Role và danh sách Permissions của User.
+  5. **Tạo `MOLToken` và Session Redis:**
+     - Đóng gói payload:
+       ```json
+       {
+         "audience": "admin",
+         "userId": "user-uuid",
+         "roleCode": "SUPER_ADMIN",
+         "permissions": ["cars.view", "cars.create", ...],
+         "authLevel": "SUPER_ADMIN",
+         "deviceId": "device-uuid",
+         "tokenVersion": 0,
+         "timestamp": 1789648800
+       }
+       ```
+     - Mã hóa payload bằng thuật toán **AES-256-GCM** với khoá `SHA-256(MOL_TOKEN_ENCRYPTION_SECRET)`:
+       $\rightarrow$ Format chuỗi: `base64url(iv).base64url(authTag).base64url(ciphertext)`.
+     - Lưu active session vào **Redis**:
+       - Key: `mol:session:admin:{userId}:{deviceId}`
+       - Value: JSON `{ "deviceId": "device-uuid", "tokenHash": "SHA256(molToken)" }`
+       - TTL: 600 giây (10 phút).
+     - Thiết lập cookie `MOLToken`:
+       - `HttpOnly: true`, `SameSite: "lax"`, `Path: "/api"`, `MaxAge: 600000 ms`.
+- **Response thành công (HTTP 200 OK):**
   ```json
   {
     "data": {
-      "accessToken": "eyJhbGciOiJIUzI1NiIsInR5c...",
-      "molToken": "iv.authTag.encryptedContent"
+      "admin": {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "email": "admin@carstore.com",
+        "username": "admin",
+        "fullName": "Super Admin",
+        "avatarUrl": null,
+        "phone": null,
+        "status": "ACTIVE",
+        "lastLoginAt": "2026-09-17T15:00:00.000Z",
+        "createdAt": "2026-09-01T00:00:00.000Z",
+        "updatedAt": "2026-09-17T15:00:00.000Z"
+      },
+      "role": "SUPER_ADMIN",
+      "permissions": ["cars.view", "cars.create", ...],
+      "molToken": "aV9k...authTag...encryptedPayload"
     },
     "requestId": "req_01j..."
   }
   ```
-  _(Đồng thời trình duyệt tự động nhận 2 Set-Cookie: `refresh_token` và `MOLToken`)._
+  _(Trình duyệt đồng thời nhận Set-Cookie `MOLToken`)._
 
 ---
 
-### Bước 3: Gửi lại mã OTP (`POST /api/auth/resend-otp`)
+### Bước 3: Gửi lại mã OTP (`POST /api/resend-login-otp`)
 
-- **Mục đích:** Yêu cầu cấp mã OTP mới khi mã cũ hết hạn hoặc không nhận được email.
+- **Mục đích:** Huỷ challenge cũ và gửi mã OTP mới nếu mã cũ quá hạn hoặc chưa nhận được email.
 - **Request:**
   ```http
-  POST /api/auth/resend-otp
+  POST /api/resend-login-otp
   Content-Type: application/json
 
   {
     "challengeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
   }
   ```
+- **Response thành công (HTTP 200):**
+  ```json
+  {
+    "data": {
+      "challengeId": "8da85f64-1234-4562-b3fc-2c963f66cce8",
+      "expiresAt": "2026-09-17T15:55:00.000Z"
+    },
+    "requestId": "req_01j..."
+  }
+  ```
 
 ---
 
-### Bước 4: Gia hạn phiên (Token Refreshing)
+### Bước 4: Gia hạn phiên làm việc (`POST /api/refresh-token`)
 
-Hệ thống hỗ trợ 2 cơ chế gia hạn song song:
-
-#### 1. Xoay vòng Refresh Token (`POST /api/auth/refresh`)
-
-- Trình duyệt tự gửi cookie `refresh_token`.
-- Backend băm SHA-256 mã token nhận được: `tokenHash = hashToken(rawToken)`.
-- Đọc thông tin phiên từ Redis key `refresh:${tokenHash}`:
-  - Nếu key không tồn tại (đã hết hạn TTL hoặc đã bị thu hồi) $\rightarrow$ Từ chối `401 INVALID_OR_EXPIRED_REFRESH_TOKEN`.
-  - Nếu hợp lệ:
-    1. **Thu hồi token cũ ngay lập tức (Single-use Rotation):**
-       - Xoá key `refresh:${tokenHash}` và `user_refresh:${userId}:${tokenHash}` khỏi Redis.
-    2. **Kiểm tra trạng thái User trong PostgreSQL:**
-       - Xác nhận `status === 'ACTIVE'`, `deleted_at IS NULL`, và `tokenVersion` hợp lệ.
-    3. **Cấp phát cặp Token mới:**
-       - Sinh Refresh Token mới, băm và ghi key mới vào Redis với TTL 7 ngày.
-       - Ký JWT Access Token mới.
-       - Ghi đè cookie `refresh_token` mới và trả về Access Token mới.
-
-#### 2. Gia hạn Redis MOL Session (`POST /api/auth/refresh-token`)
-
-- Kiểm tra cookie `MOLToken` trong Redis:
-  - Nếu session còn hợp lệ trên Redis, tự động reset thời gian sống (TTL) thêm 600 giây (`EXPIRE`).
+- **Cơ chế gia hạn của `car-store-api` & `car-store-web`:**
+  - Client gọi `POST /api/refresh-token` gửi kèm Cookie `MOLToken` (hoặc header `Authorization: MOLToken <token>`).
+  - Backend giải mã token và xác thực session trên Redis.
+  - Backend kéo dài thời hạn sống của key Redis thêm 600 giây:
+    ```typescript
+    EXPIRE mol:session:admin:{userId}:{deviceId} 600
+    ```
+  - Ghi đè lại cookie `MOLToken` với thời hạn mới 600 giây.
+  - Trả về token hiện tại.
+- **Response thành công (HTTP 200):**
+  ```json
+  {
+    "data": {
+      "molToken": "aV9k...authTag...encryptedPayload"
+    },
+    "requestId": "req_01j..."
+  }
+  ```
 
 ---
 
 ### Bước 5: Đăng xuất (Logout)
 
-#### 1. Đăng xuất trên thiết bị hiện tại (`POST /api/auth/logout`)
+#### 1. Đăng xuất trên thiết bị hiện tại (`POST /api/logout`)
+- Lấy `MOLToken` từ header hoặc cookie.
+- Giải mã lấy `userId` và `deviceId`.
+- Xoá key phiên trong Redis:
+  ```redis
+  DEL mol:session:admin:{userId}:{deviceId}
+  ```
+- Xoá cookie `MOLToken` trên trình duyệt (`Max-Age: 0`).
+- Trả về `{ message: "Logged out successfully" }`.
 
-- Lấy cookie `refresh_token` từ request.
-- Băm SHA-256 và xoá trực tiếp khỏi Redis:
-  - `DEL refresh:${tokenHash}`
-  - `DEL user_refresh:${userId}:${tokenHash}`
-- Xoá key phiên MOL trong Redis:
-  - `DEL mol:session:admin:{userId}:{deviceId}`
-- Xoá 2 cookies trên client: `refresh_token` và `MOLToken`.
-- **Hoàn toàn không cần ghi hay cập nhật vào database PostgreSQL.**
-
-#### 2. Đăng xuất khỏi tất cả thiết bị (`POST /api/auth/logout-all`)
-
-- Tìm và xoá toàn bộ key refresh token của user trên Redis:
-  - Quét `SCAN user_refresh:${userId}:*` $\rightarrow$ Xoá key index và key `refresh:*` tương ứng.
-- Quét và xoá toàn bộ key session MOL:
-  - Quét `SCAN mol:session:admin:{userId}:*` $\rightarrow$ `DEL`.
+#### 2. Đăng xuất khỏi tất cả thiết bị (`POST /api/logout-all`)
+- Quét và xoá toàn bộ key session Redis của user:
+  ```redis
+  SCAN mol:session:admin:{userId}:* -> DEL
+  ```
 - **Tăng `token_version` thêm 1** trong bảng `users` (PostgreSQL):
-  $\rightarrow$ Ngay lập tức vô hiệu hoá toàn bộ JWT Access Token cũ ở bất kỳ đâu, vì `JwtStrategy` kiểm tra `payload.tokenVersion === user.tokenVersion`.
-- Xoá cookies trên thiết bị gửi request.
+  - Bất kỳ `MOLToken` nào còn lưu hành đều bị từ chối ngay lập tức tại `MolAuthGuard` vì:
+    `user.tokenVersion !== tokenData.tokenVersion`.
+- Xoá cookie `MOLToken`.
+- Trả về `{ message: "All sessions have been revoked" }`.
 
 ---
 
-## 3. Bảng tổng hợp các Cookie & Token
+### Bước 6: Các API người dùng khác
 
-| Tên Token / Cookie  | Nơi lưu trữ                            | Thời hạn             | Thuộc tính bảo mật                            | Mục đích sử dụng                                                                   |
-| ------------------- | -------------------------------------- | -------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **Access Token**    | Bộ nhớ RAM Client (hoặc Bearer Header) | 15 phút              | `Authorization: Bearer <token>`               | Gọi các API yêu cầu xác thực và phân quyền RBAC                                    |
-| **`refresh_token`** | **Redis in-memory** (`refresh:*`)      | 7 ngày (TTL tự huỷ)  | `HttpOnly`, `SameSite=Strict`, `Secure`       | Xoay vòng cấp mới Access Token; tự động hết hạn, không cần dọn dẹp database rác    |
-| **`MOLToken`**      | **Redis in-memory** (`mol:session:*`)  | 10 phút (tự gia hạn) | `HttpOnly`, `SameSite=Strict`, `Secure`       | Quản lý phiên tức thời tốc độ cao, tương thích logic phiên của `car-store-api`     |
-| **OTP Code**        | PostgreSQL (`login_otp_tokens`)        | 10 phút              | Lưu dưới dạng băm `SHA-256`, tối đa 5 lần thử | Xác thực 2 bước (2FA) bảo vệ an toàn tài khoản qua email                           |
+1. **Lấy hồ sơ cá nhân (`GET /api/profile`):**
+   - Đọc phiên từ cookie `MOLToken`.
+   - Trả về: `{ admin, role, permissions }`.
+2. **Cập nhật thông tin cá nhân (`PATCH /api/profile`):**
+   - Body: `{ fullName?, avatarUrl?, phone? }`.
+3. **Đổi mật khẩu (`POST /api/change-password`):**
+   - Body: `{ currentPassword, newPassword }`.
+   - Cập nhật mật khẩu mới, sau đó tự động gọi `logoutAll` (tăng `tokenVersion` và xoá toàn bộ Redis key).
+4. **Quên mật khẩu (`POST /api/forgot-password` & `POST /api/reset-password`):**
+   - Tạo token đặt lại mật khẩu trong bảng `password_reset_tokens` và gửi email.
+   - Nhập token + mật khẩu mới để đặt lại mật khẩu và huỷ các phiên cũ.
 
 ---
 
-## 4. Các tính năng bảo mật tích hợp (Security Safeguards)
+## 3. Bảng tổng hợp các Token & Cookie
 
-1. **Chống Brute Force OTP:**
-   - Giới hạn tối đa 5 lần nhập sai mã OTP cho mỗi challenge.
-   - Quá 5 lần, challenge sẽ bị khoá/huỷ ngay lập tức (`attempts >= 5`).
-2. **Xoay vòng Refresh Token một lần dùng (Single-use Token Rotation):**
-   - Refresh token được xoá khỏi Redis ngay trong lúc xoay vòng để cấp token mới.
-   - Không lo rò rỉ hay việc tái sử dụng token cũ.
-3. **Thu hồi phiên tức thì (Instant Revocation):**
-   - Thao tác `logout-all` hoặc đổi mật khẩu sẽ tăng `tokenVersion` trên database và xoá sạch key Redis, vô hiệu hoá ngay lập tức mọi token đang lưu hành trên toàn bộ các thiết bị.
+| Tên Token / Cookie | Nơi lưu trữ                         | Thời hạn             | Cơ chế mã hoá / Bảo mật                       | Mục đích sử dụng                                                                   |
+| ------------------ | ----------------------------------- | -------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **`MOLToken`**     | **Redis in-memory** (`mol:session:*`) | 10 phút (tự gia hạn) | **AES-256-GCM** đối xứng; Cookie `HttpOnly`  | Nhận diện người dùng, phân quyền RBAC, duy trì phiên tốc độ cao in-memory          |
+| **OTP Code**       | PostgreSQL (`login_otp_tokens`)     | 10 phút              | Băm `SHA-256`, giới hạn tối đa 5 lần thử      | Xác thực 2 bước (2FA) bảo vệ tài khoản qua email                                   |
+
+---
+
+## 4. Các tính năng an toàn bảo mật (Security Safeguards)
+
+1. **Mã hoá đối xứng AES-256-GCM Authenticated Encryption:**
+   - Dữ liệu session chứa role, permissions, deviceId, tokenVersion được đóng gói và mã hóa. Mọi hành vi sửa đổi trái phép trên token đều bị phát hiện ngay lập tức bởi GCM authTag.
+2. **Kiểm tra Device ID Binding:**
+   - Mỗi token được gắn với 1 `deviceId` duy nhất (qua header `x-device-id`). Token bị sao chép sang thiết bị khác sẽ bị phát hiện và từ chối.
+3. **Thu hồi phiên tức thì qua Redis & Token Version:**
+   - Khi đổi mật khẩu hoặc `logout-all`, việc tăng `tokenVersion` trong database lập tức làm vô hiệu toàn bộ các token đã mã hóa đang lưu hành trên toàn thế giới mà không cần chờ thời gian hết hạn.
 4. **Bảo mật Cookie:**
-   - Cookies được đánh dấu `HttpOnly` (ngăn chặn tấn công XSS đọc cookie) và `SameSite=Strict` (chống tấn công CSRF).
+   - Cookie `MOLToken` sử dụng `HttpOnly: true` (chống đọc trộm qua XSS), `SameSite: "lax"`, và `Path: "/api"`.
 5. **Che giấu thông tin nhạy cảm:**
-   - `passwordHash` luôn được loại bỏ khỏi các query thông thường (`select: false`).
-   - Phản hồi đăng nhập không làm lộ sự tồn tại của email trong hệ thống (Timing Attack resistant).
+   - Cột `password_hash`, `token_version` luôn bị ẩn (`select: false`), không bao giờ rò rỉ trong API response.

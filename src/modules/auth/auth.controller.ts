@@ -8,18 +8,25 @@ import {
   Res,
   HttpCode,
   HttpStatus,
-  UseGuards,
-} from "@nestjs/common";
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
   ApiCookieAuth,
-} from "@nestjs/swagger";
-import { Request, Response } from "express";
-import { randomUUID } from "crypto";
+} from '@nestjs/swagger';
+import { Request, Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
-import { AuthService } from "./auth.service";
+import {
+  AuthService,
+  clearMOLTokenCookie,
+  serializeAdmin,
+  setMOLTokenCookie,
+} from './auth.service';
 import {
   LoginDto,
   VerifyOtpDto,
@@ -28,29 +35,37 @@ import {
   ResetPasswordDto,
   ChangePasswordDto,
   UpdateProfileDto,
-} from "./auth.dto";
-import { Public } from "../../common/decorators";
-import { CurrentUser } from "../../common/decorators";
-import { RequestUser } from "../../common/types/jwt-payload.interface";
-import {
-  REFRESH_TOKEN_COOKIE,
-  DEVICE_ID_HEADER,
-} from "../../common/constants/app.constants";
+} from './auth.dto';
+import { Public, CurrentUser } from '../../common/decorators';
+import { RequestUser } from '../../common/types/jwt-payload.interface';
+import { MolTokenService, MOL_TOKEN_COOKIE } from './mol-token.service';
+import { User } from '../users/entities/user.entity';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AuthController
-// ──────────────────────────────────────────────────────────────────────────────
-@ApiTags("Auth")
-@Controller("auth")
+@ApiTags('Auth')
+@Controller()
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly molTokenService: MolTokenService,
+    private readonly configService: ConfigService,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+  ) {}
+
+  private resolveDeviceId(req: Request): string {
+    const raw = req.headers['x-device-id'];
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      return raw.trim();
+    }
+    return this.molTokenService.resolveDeviceId();
+  }
 
   // ─── Step 1: Validate credentials, send OTP ───────────────────────────────
   @Public()
-  @Post("login")
-  @HttpCode(HttpStatus.OK)
+  @Post(['login', 'auth/login'])
+  @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
-    summary: "Step 1 – validate credentials and send OTP to email",
+    summary: 'Step 1 – validate credentials and send OTP to email',
   })
   async login(
     @Body() dto: LoginDto,
@@ -58,186 +73,191 @@ export class AuthController {
     return this.authService.requestLoginOtp(dto.email, dto.password);
   }
 
-  // ─── Step 2: Submit OTP, receive JWT + refresh cookie ─────────────────────
+  // ─── Step 2: Submit OTP, receive MOLToken ────────────────────────────────
   @Public()
-  @Post("verify-otp")
+  @Post(['verify-login-otp', 'auth/verify-login-otp', 'auth/verify-otp'])
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: "Step 2 – submit OTP to complete login and receive access token",
+    summary:
+      'Step 2 – submit OTP to complete login and receive MOLToken session',
   })
   async verifyOtp(
     @Body() dto: VerifyOtpDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string; molToken?: string }> {
+  ) {
     const deviceId = this.resolveDeviceId(req);
-    const ipAddress = this.resolveIp(req);
-    const userAgent = (req.headers["user-agent"] as string) ?? "";
-
     return this.authService.verifyLoginOtp(
       dto.challengeId,
       dto.otp,
       deviceId,
-      ipAddress,
-      userAgent,
       res,
     );
   }
 
-  // ─── Resend OTP (same challenge or re-initiate) ────────────────────────────
+  // ─── Resend OTP ──────────────────────────────────────────────────────────
   @Public()
-  @Post("resend-otp")
+  @Post(['resend-login-otp', 'auth/resend-login-otp', 'auth/resend-otp'])
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Resend a new OTP for an active challenge" })
-  async resendOtp(@Body() _dto: ResendOtpDto): Promise<{ message: string }> {
-    // For MVP: returning a generic success. Full implementation would
-    // look up the original login email via the challengeId and call requestLoginOtp again.
-    // This requires the LoginOtpToken to store the userId/email so it can be resent.
-    return { message: "If the challenge is valid, a new OTP has been sent." };
+  @ApiOperation({ summary: 'Resend a new OTP for an active challenge' })
+  async resendOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.resendLoginOtp(dto.challengeId);
   }
 
-  // ─── Refresh access token ──────────────────────────────────────────────────
-  @Public()
-  @Post("refresh")
+  // ─── Refresh MOLToken session ────────────────────────────────────────────
+  @Post(['refresh-token', 'auth/refresh-token', 'auth/refresh'])
   @HttpCode(HttpStatus.OK)
-  @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
+  @ApiCookieAuth('MOLToken')
   @ApiOperation({
-    summary: "Exchange a valid refresh token cookie for a new access token",
+    summary: 'Extend active MOLToken session in Redis and reset cookie',
   })
   async refresh(
+    @CurrentUser() user: RequestUser,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string }> {
-    const cookie = req.cookies[REFRESH_TOKEN_COOKIE] as string | undefined;
-    if (!cookie) {
-      // Return 401 rather than importing AuthGuard separately
-      throw new (await import("@nestjs/common").then(
-        (m) => m.UnauthorizedException,
-      ))();
+  ): Promise<{ molToken: string }> {
+    const token =
+      user.token ??
+      this.molTokenService.extractAuthorizationToken(req.headers.authorization) ??
+      (req.cookies?.[MOL_TOKEN_COOKIE] as string | undefined);
+
+    if (!user.tokenData || !token) {
+      clearMOLTokenCookie(res, this.configService);
+      throw new UnauthorizedException('MOL token is required');
     }
 
-    const deviceId = this.resolveDeviceId(req);
-    const userAgent = (req.headers["user-agent"] as string) ?? "";
-
-    return this.authService.refreshAccessToken(
-      cookie,
-      deviceId,
-      userAgent,
-      res,
-    );
+    await this.molTokenService.refresh(user.tokenData);
+    setMOLTokenCookie(res, token, this.configService);
+    return { molToken: token };
   }
 
-  // ─── Logout (single device) ────────────────────────────────────────────────
-  @Post("logout")
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiBearerAuth()
+  // ─── Logout (single device) ──────────────────────────────────────────────
+  @Public()
+  @Post(['logout', 'auth/logout'])
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: "Revoke the current refresh token and clear the cookie",
+    summary: 'Revoke active MOL session on Redis and clear cookie',
   })
   async logout(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    const cookie = req.cookies[REFRESH_TOKEN_COOKIE] as string | undefined;
-    if (cookie) {
-      await this.authService.logout(cookie, res);
+  ): Promise<{ message: string }> {
+    const token =
+      this.molTokenService.extractAuthorizationToken(req.headers.authorization) ??
+      (req.cookies?.[MOL_TOKEN_COOKIE] as string | undefined);
+
+    if (token) {
+      try {
+        const tokenData = this.molTokenService.decryptMOLToken(token);
+        await this.molTokenService.revoke(tokenData);
+      } catch {
+        // Ignore decryption errors on logout
+      }
     }
+
+    clearMOLTokenCookie(res, this.configService);
+    return { message: 'Logged out successfully' };
   }
 
-  // ─── Logout all devices ────────────────────────────────────────────────────
-  @Post("logout-all")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  // ─── Logout all devices ──────────────────────────────────────────────────
+  @Post(['logout-all', 'auth/logout-all'])
+  @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Revoke all refresh tokens for the current user" })
+  @ApiOperation({
+    summary: 'Revoke all sessions for this user across all devices',
+  })
   async logoutAll(
     @CurrentUser() user: RequestUser,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    await this.authService.logoutAll(user.sub, res);
+  ): Promise<{ message: string }> {
+    await this.authService.revokeAllAdminSessions(user.id);
+    clearMOLTokenCookie(res, this.configService);
+    return { message: 'All sessions have been revoked' };
   }
 
-  // ─── Get current user profile ──────────────────────────────────────────────
-  @Get("profile")
+  // ─── Get current profile ─────────────────────────────────────────────────
+  @Get(['profile', 'auth/profile'])
   @ApiBearerAuth()
-  @ApiOperation({
-    summary: "Get the authenticated user's profile with permissions",
-  })
-  getProfile(@CurrentUser() user: RequestUser): RequestUser {
-    return user;
+  @ApiOperation({ summary: 'Get current authenticated user profile' })
+  async getProfile(@CurrentUser() user: RequestUser) {
+    const admin = await this.authService.getAdminById(user.id);
+    const auth = await this.authService.resolveAuthorization(admin);
+    return {
+      admin: serializeAdmin(admin),
+      role: auth.roleCode,
+      permissions: auth.permissions,
+    };
   }
 
-  // ─── Update profile (name, phone) ─────────────────────────────────────────
-  @Patch("profile")
+  // ─── Update profile ──────────────────────────────────────────────────────
+  @Patch(['profile', 'auth/profile'])
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Update display name or phone number" })
+  @ApiOperation({ summary: 'Update profile for the authenticated admin' })
   async updateProfile(
     @CurrentUser() user: RequestUser,
-    @Body() _dto: UpdateProfileDto,
-  ): Promise<{ message: string }> {
-    // Profile updates are a UsersService concern — stub here for route registration.
-    // A full implementation would inject UsersService and call usersService.update().
-    return { message: "Profile update not yet implemented" };
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const admin = await this.authService.getAdminById(user.id);
+    if (dto.fullName !== undefined) admin.fullName = dto.fullName;
+    if (dto.avatarUrl !== undefined) admin.avatarUrl = dto.avatarUrl;
+    if (dto.phone !== undefined) admin.phone = dto.phone;
+
+    const saved = await this.userRepo.save(admin);
+    return {
+      admin: serializeAdmin(saved),
+      message: 'Profile updated',
+    };
   }
 
-  // ─── Change password ───────────────────────────────────────────────────────
-  @Post("change-password")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  // ─── Change password ─────────────────────────────────────────────────────
+  @Post(['change-password', 'auth/change-password'])
+  @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({
-    summary: "Change password (requires current password verification)",
-  })
+  @ApiOperation({ summary: 'Change password for the authenticated admin' })
   async changePassword(
     @CurrentUser() user: RequestUser,
     @Body() dto: ChangePasswordDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
+  ): Promise<{ message: string }> {
     await this.authService.changePassword(
-      user.sub,
+      user.id,
       dto.currentPassword,
       dto.newPassword,
-      res,
     );
+    clearMOLTokenCookie(res, this.configService);
+    return { message: 'Password changed; please sign in again' };
   }
 
-  // ─── Forgot password ───────────────────────────────────────────────────────
+  // ─── Forgot password ─────────────────────────────────────────────────────
   @Public()
-  @Post("forgot-password")
+  @Post(['forgot-password', 'auth/forgot-password'])
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Request a password-reset email (always returns 200)",
-  })
+  @ApiOperation({ summary: 'Request password reset instructions via email' })
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
     await this.authService.requestPasswordReset(dto.email);
-    return { message: "If that email exists, a reset link has been sent." };
+    return {
+      message:
+        'If the account exists, password reset instructions have been sent',
+    };
   }
 
-  // ─── Reset password ────────────────────────────────────────────────────────
+  // ─── Reset password ──────────────────────────────────────────────────────
   @Public()
-  @Post("reset-password")
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({
-    summary: "Set a new password using the token from the reset email",
-  })
+  @Post(['reset-password', 'auth/reset-password'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using an email token' })
   async resetPassword(
     @Body() dto: ResetPasswordDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    await this.authService.resetPassword(dto.token, dto.password, res);
-  }
-
-  // ─── Private helpers ───────────────────────────────────────────────────────
-
-  private resolveDeviceId(req: Request): string {
-    const header = req.headers[DEVICE_ID_HEADER];
-    if (typeof header === "string" && header.length > 0) return header;
-    return randomUUID();
-  }
-
-  private resolveIp(req: Request): string {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
-    return req.socket?.remoteAddress ?? "";
+  ): Promise<{ message: string }> {
+    const newPassword = dto.newPassword || dto.password;
+    if (!newPassword) {
+      throw new UnauthorizedException('New password is required');
+    }
+    await this.authService.resetPassword(dto.token, newPassword);
+    clearMOLTokenCookie(res, this.configService);
+    return { message: 'Password reset successfully; please sign in' };
   }
 }

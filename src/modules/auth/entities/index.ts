@@ -1,2 +1,2 @@
-export { LoginOtpToken } from './login-otp-token.entity';
-export { PasswordResetToken } from './password-reset-token.entity';
+export { LoginOtpToken } from "./login-otp-token.entity";
+export { PasswordResetToken } from "./password-reset-token.entity";

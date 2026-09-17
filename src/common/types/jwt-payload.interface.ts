@@ -1,17 +1,22 @@
 export interface JwtPayload {
   /** User ID (UUID) */
   sub: string;
+  id: string;
   email: string;
-  /** Role code, e.g. 'admin', 'editor' */
+  /** Role code, e.g. 'SUPER_ADMIN', 'SALES_STAFF' */
   role: string;
-  /** Flat list of permission strings, e.g. ['cars:read', 'cars:write'] */
+  /** Flat list of permission strings, e.g. ['cars.view', 'cars.create'] */
   permissions: string[];
   /** Incremented on password change / forced logout to invalidate old tokens */
   tokenVersion: number;
-  /** JWT ID — unique identifier for this token (used for refresh token rotation) */
-  jti: string;
+  /** Device ID of current session */
+  deviceId?: string;
+  /** Active session token string */
+  token?: string;
+  /** Decrypted session payload */
+  tokenData?: any;
+  /** Optional legacy jti */
+  jti?: string;
 }
 
-export interface RequestUser extends JwtPayload {
-  // Merged onto req.user by JwtStrategy.validate()
-}
+export interface RequestUser extends JwtPayload {}

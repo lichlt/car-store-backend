@@ -54,10 +54,17 @@ export class ResetPasswordDto {
   @IsString()
   token!: string;
 
-  @ApiProperty({ example: 'NewP@ssw0rd!', description: 'New password (min 8 chars)' })
+  @ApiPropertyOptional({ example: 'NewP@ssw0rd!', description: 'New password (min 8 chars)' })
+  @IsOptional()
   @IsString()
   @MinLength(8)
-  password!: string;
+  newPassword?: string;
+
+  @ApiPropertyOptional({ example: 'NewP@ssw0rd!', description: 'Password (min 8 chars)' })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  password?: string;
 }
 
 export class ChangePasswordDto {
@@ -76,6 +83,11 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   fullName?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg', description: 'Avatar URL' })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 
   @ApiPropertyOptional({ example: '+84912345678', description: 'Phone number (max 30 chars)' })
   @IsOptional()
