@@ -224,6 +224,7 @@ sequenceDiagram
 ### Bước 5: Đăng xuất (Logout)
 
 #### 1. Đăng xuất trên thiết bị hiện tại (`POST /api/logout`)
+
 - Lấy `MOLToken` từ header hoặc cookie.
 - Giải mã lấy `userId` và `deviceId`.
 - Xoá key phiên trong Redis:
@@ -234,6 +235,7 @@ sequenceDiagram
 - Trả về `{ message: "Logged out successfully" }`.
 
 #### 2. Đăng xuất khỏi tất cả thiết bị (`POST /api/logout-all`)
+
 - Quét và xoá toàn bộ key session Redis của user:
   ```redis
   SCAN mol:session:admin:{userId}:* -> DEL
@@ -264,10 +266,10 @@ sequenceDiagram
 
 ## 3. Bảng tổng hợp các Token & Cookie
 
-| Tên Token / Cookie | Nơi lưu trữ                         | Thời hạn             | Cơ chế mã hoá / Bảo mật                       | Mục đích sử dụng                                                                   |
-| ------------------ | ----------------------------------- | -------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **`MOLToken`**     | **Redis in-memory** (`mol:session:*`) | 10 phút (tự gia hạn) | **AES-256-GCM** đối xứng; Cookie `HttpOnly`  | Nhận diện người dùng, phân quyền RBAC, duy trì phiên tốc độ cao in-memory          |
-| **OTP Code**       | PostgreSQL (`login_otp_tokens`)     | 10 phút              | Băm `SHA-256`, giới hạn tối đa 5 lần thử      | Xác thực 2 bước (2FA) bảo vệ tài khoản qua email                                   |
+| Tên Token / Cookie | Nơi lưu trữ                           | Thời hạn             | Cơ chế mã hoá / Bảo mật                     | Mục đích sử dụng                                                          |
+| ------------------ | ------------------------------------- | -------------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| **`MOLToken`**     | **Redis in-memory** (`mol:session:*`) | 10 phút (tự gia hạn) | **AES-256-GCM** đối xứng; Cookie `HttpOnly` | Nhận diện người dùng, phân quyền RBAC, duy trì phiên tốc độ cao in-memory |
+| **OTP Code**       | PostgreSQL (`login_otp_tokens`)       | 10 phút              | Băm `SHA-256`, giới hạn tối đa 5 lần thử    | Xác thực 2 bước (2FA) bảo vệ tài khoản qua email                          |
 
 ---
 

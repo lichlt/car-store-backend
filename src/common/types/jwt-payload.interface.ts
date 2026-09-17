@@ -1,3 +1,5 @@
+import type { MOLTokenData } from '../../modules/auth/mol-token.service';
+
 export interface JwtPayload {
   /** User ID (UUID) */
   sub: string;
@@ -14,7 +16,7 @@ export interface JwtPayload {
   /** Active session token string */
   token?: string;
   /** Decrypted session payload */
-  tokenData?: any;
+  tokenData?: MOLTokenData;
   /** Optional legacy jti */
   jti?: string;
 }

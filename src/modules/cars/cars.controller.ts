@@ -1,3 +1,4 @@
+import 'multer';
 import {
   Body,
   Controller,

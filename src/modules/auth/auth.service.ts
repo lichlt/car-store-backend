@@ -4,37 +4,35 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, MoreThan } from 'typeorm';
-import { Response } from 'express';
-import * as bcrypt from 'bcryptjs';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, IsNull, MoreThan } from "typeorm";
+import { Response } from "express";
+import * as bcrypt from "bcryptjs";
 
-import { User, UserStatus } from '../users/entities/user.entity';
-import { Role } from '../users/entities/role.entity';
-import { LoginOtpToken } from './entities/login-otp-token.entity';
-import { PasswordResetToken } from './entities/password-reset-token.entity';
-import { MailService } from './mail.service';
+import { User, UserStatus } from "../users/entities/user.entity";
+import { Role } from "../users/entities/role.entity";
+import { LoginOtpToken } from "./entities/login-otp-token.entity";
+import { PasswordResetToken } from "./entities/password-reset-token.entity";
+import { MailService } from "./mail.service";
 import {
   hashToken,
   generateOtp,
   generateSecureToken,
   normalizeEmail,
-} from '../../common/utils/crypto.utils';
-import { MolTokenService, MOL_TOKEN_COOKIE } from './mol-token.service';
+} from "../../common/utils/crypto.utils";
+import { MolTokenService, MOL_TOKEN_COOKIE } from "./mol-token.service";
 
 const LOGIN_OTP_MAX_ATTEMPTS = 5;
 const PASSWORD_RESET_TTL_MINUTES = 30;
 
 export function serializeAdmin(user: User): Record<string, unknown> {
-  const {
-    passwordHash: _p,
-    tokenVersion: _t,
-    deletedAt: _d,
-    ...rest
-  } = user as any;
-  return rest;
+  const adminObj = { ...user } as Record<string, unknown>;
+  delete adminObj.passwordHash;
+  delete adminObj.tokenVersion;
+  delete adminObj.deletedAt;
+  return adminObj;
 }
 
 export function setMOLTokenCookie(
@@ -42,16 +40,16 @@ export function setMOLTokenCookie(
   token: string,
   configService: ConfigService,
 ): void {
-  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+  const isProduction = configService.get<string>("NODE_ENV") === "production";
   const durationSeconds =
-    configService.get<number>('MOL_TOKEN_DURATION_SECONDS') ?? 600;
-  const cookieDomain = configService.get<string>('COOKIE_DOMAIN');
+    configService.get<number>("MOL_TOKEN_DURATION_SECONDS") ?? 600;
+  const cookieDomain = configService.get<string>("COOKIE_DOMAIN");
   res.cookie(MOL_TOKEN_COOKIE, token, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: "lax",
     domain: cookieDomain || undefined,
-    path: '/api',
+    path: "/api",
     maxAge: durationSeconds * 1000,
   });
 }
@@ -60,10 +58,10 @@ export function clearMOLTokenCookie(
   res: Response,
   configService: ConfigService,
 ): void {
-  const cookieDomain = configService.get<string>('COOKIE_DOMAIN');
-  res.cookie(MOL_TOKEN_COOKIE, '', {
+  const cookieDomain = configService.get<string>("COOKIE_DOMAIN");
+  res.cookie(MOL_TOKEN_COOKIE, "", {
     httpOnly: true,
-    path: '/api',
+    path: "/api",
     domain: cookieDomain || undefined,
     maxAge: 0,
   });
@@ -97,7 +95,7 @@ export class AuthService {
   ) {}
 
   private getOtpTtlMinutes(): number {
-    return this.configService.get<number>('LOGIN_OTP_TTL_MINUTES', 10);
+    return this.configService.get<number>("LOGIN_OTP_TTL_MINUTES", 10);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -110,19 +108,19 @@ export class AuthService {
     const normalized = normalizeEmail(email);
 
     const user = await this.userRepo
-      .createQueryBuilder('user')
-      .addSelect('user.passwordHash')
-      .where('user.email = :email', { email: normalized })
-      .andWhere('user.deletedAt IS NULL')
+      .createQueryBuilder("user")
+      .addSelect("user.passwordHash")
+      .where("user.email = :email", { email: normalized })
+      .andWhere("user.deletedAt IS NULL")
       .getOne();
 
     const dummyHash =
-      '$2a$12$e8k8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT';
+      "$2a$12$e8k8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT5N5cRkQO5eK8fT9jQ.uT";
     const hashToCompare = user?.passwordHash ?? dummyHash;
     const passwordMatch = await bcrypt.compare(password, hashToCompare);
 
-    if (!user || !passwordMatch || user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('Invalid email or password');
+    if (!user || !passwordMatch || user.status !== "ACTIVE") {
+      throw new UnauthorizedException("Invalid email or password");
     }
 
     // Invalidate active OTPs for this user
@@ -143,9 +141,11 @@ export class AuthService {
     });
     const saved = await this.otpTokenRepo.save(challenge);
 
-    this.mailService.sendLoginOtp(user.email, otp, user.fullName).catch((err) => {
-      console.error('Failed to send OTP email:', err);
-    });
+    this.mailService
+      .sendLoginOtp(user.email, otp, user.fullName)
+      .catch((err) => {
+        console.error("Failed to send OTP email:", err);
+      });
 
     return { challengeId: saved.id, expiresAt: saved.expiresAt };
   }
@@ -169,26 +169,26 @@ export class AuthService {
     });
 
     if (!otpToken) {
-      throw new UnauthorizedException('Login code is invalid or expired');
+      throw new UnauthorizedException("Login code is invalid or expired");
     }
 
     if (otpToken.expiresAt <= now) {
-      throw new UnauthorizedException('Login code is invalid or expired');
+      throw new UnauthorizedException("Login code is invalid or expired");
     }
 
     if (otpToken.attempts >= LOGIN_OTP_MAX_ATTEMPTS) {
       otpToken.usedAt = now;
       await this.otpTokenRepo.save(otpToken);
       throw new HttpException(
-        'Too many invalid login code attempts',
+        "Too many invalid login code attempts",
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
     const codeHash = hashToken(otp);
     if (codeHash !== otpToken.codeHash) {
-      await this.otpTokenRepo.increment({ id: otpToken.id }, 'attempts', 1);
-      throw new UnauthorizedException('Login code is invalid or expired');
+      await this.otpTokenRepo.increment({ id: otpToken.id }, "attempts", 1);
+      throw new UnauthorizedException("Login code is invalid or expired");
     }
 
     // Mark challenge as used
@@ -197,22 +197,22 @@ export class AuthService {
 
     // Load full user with role and permissions
     const user = await this.userRepo
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.role', 'role')
-      .leftJoinAndSelect('role.permissions', 'permission')
-      .addSelect('user.tokenVersion')
-      .where('user.id = :id', { id: otpToken.userId })
-      .andWhere('user.deletedAt IS NULL')
+      .createQueryBuilder("user")
+      .leftJoinAndSelect("user.role", "role")
+      .leftJoinAndSelect("role.permissions", "permission")
+      .addSelect("user.tokenVersion")
+      .where("user.id = :id", { id: otpToken.userId })
+      .andWhere("user.deletedAt IS NULL")
       .getOne();
 
-    if (!user || user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('Admin is inactive or no longer exists');
+    if (!user || user.status !== "ACTIVE") {
+      throw new UnauthorizedException("Admin is inactive or no longer exists");
     }
 
     // Update lastLoginAt
     await this.userRepo.update(user.id, { lastLoginAt: now });
 
-    const roleCode = user.role?.code ?? 'VIEWER';
+    const roleCode = user.role?.code ?? "VIEWER";
     const permissions = user.role?.permissions
       ? user.role.permissions.map((p) => p.code)
       : [];
@@ -220,7 +220,7 @@ export class AuthService {
     // Issue MOLToken
     const molToken = await this.molTokenService.issue(
       {
-        audience: 'admin',
+        audience: "admin",
         userId: user.id,
         roleCode,
         permissions,
@@ -252,15 +252,19 @@ export class AuthService {
     });
 
     if (!previous) {
-      throw new UnauthorizedException('Login code is invalid or expired');
+      throw new UnauthorizedException("Login code is invalid or expired");
     }
 
     const user = await this.userRepo.findOne({
-      where: { id: previous.userId, status: UserStatus.ACTIVE, deletedAt: IsNull() },
+      where: {
+        id: previous.userId,
+        status: UserStatus.ACTIVE,
+        deletedAt: IsNull(),
+      },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Admin is inactive or no longer exists');
+      throw new UnauthorizedException("Admin is inactive or no longer exists");
     }
 
     // Invalidate previous challenge
@@ -279,9 +283,11 @@ export class AuthService {
     });
     const saved = await this.otpTokenRepo.save(nextChallenge);
 
-    this.mailService.sendLoginOtp(user.email, otp, user.fullName).catch((err) => {
-      console.error('Failed to resend OTP email:', err);
-    });
+    this.mailService
+      .sendLoginOtp(user.email, otp, user.fullName)
+      .catch((err) => {
+        console.error("Failed to resend OTP email:", err);
+      });
 
     return { challengeId: saved.id, expiresAt: saved.expiresAt };
   }
@@ -291,8 +297,8 @@ export class AuthService {
   // ─────────────────────────────────────────────────────────────────────────
   async revokeAllAdminSessions(userId: string): Promise<void> {
     await Promise.all([
-      this.molTokenService.revokeAll('admin', userId),
-      this.userRepo.increment({ id: userId }, 'tokenVersion', 1),
+      this.molTokenService.revokeAll("admin", userId),
+      this.userRepo.increment({ id: userId }, "tokenVersion", 1),
     ]);
   }
 
@@ -305,14 +311,14 @@ export class AuthService {
     newPassword: string,
   ): Promise<void> {
     const user = await this.userRepo
-      .createQueryBuilder('user')
-      .addSelect('user.passwordHash')
-      .where('user.id = :id', { id: userId })
-      .andWhere('user.deletedAt IS NULL')
+      .createQueryBuilder("user")
+      .addSelect("user.passwordHash")
+      .where("user.id = :id", { id: userId })
+      .andWhere("user.deletedAt IS NULL")
       .getOne();
 
     if (!user || !(await user.comparePassword(currentPassword))) {
-      throw new UnauthorizedException('Current password is incorrect');
+      throw new UnauthorizedException("Current password is incorrect");
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 10);
@@ -348,15 +354,15 @@ export class AuthService {
     await this.pwdResetTokenRepo.save(token);
 
     const frontendUrl = this.configService.get<string>(
-      'FRONTEND_URL',
-      'http://localhost:3000',
+      "FRONTEND_URL",
+      "http://localhost:3000",
     );
-    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(raw)}`;
+    const resetUrl = `${frontendUrl.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(raw)}`;
 
     this.mailService
       .sendPasswordReset(user.email, resetUrl, user.fullName)
       .catch((err) => {
-        console.error('Password reset email delivery failed:', err);
+        console.error("Password reset email delivery failed:", err);
       });
   }
 
@@ -375,7 +381,7 @@ export class AuthService {
 
     if (!token) {
       throw new HttpException(
-        'Password reset token is invalid or expired',
+        "Password reset token is invalid or expired",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -384,15 +390,15 @@ export class AuthService {
     await this.pwdResetTokenRepo.save(token);
 
     const user = await this.userRepo
-      .createQueryBuilder('user')
-      .addSelect('user.passwordHash')
-      .where('user.id = :id', { id: token.userId })
-      .andWhere('user.deletedAt IS NULL')
+      .createQueryBuilder("user")
+      .addSelect("user.passwordHash")
+      .where("user.id = :id", { id: token.userId })
+      .andWhere("user.deletedAt IS NULL")
       .getOne();
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || user.status !== "ACTIVE") {
       throw new HttpException(
-        'Password reset token is invalid',
+        "Password reset token is invalid",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -407,15 +413,15 @@ export class AuthService {
   // ─────────────────────────────────────────────────────────────────────────
   async getAdminById(id: string): Promise<User> {
     const user = await this.userRepo
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.role', 'role')
-      .leftJoinAndSelect('role.permissions', 'permission')
-      .where('user.id = :id', { id })
-      .andWhere('user.deletedAt IS NULL')
+      .createQueryBuilder("user")
+      .leftJoinAndSelect("user.role", "role")
+      .leftJoinAndSelect("role.permissions", "permission")
+      .where("user.id = :id", { id })
+      .andWhere("user.deletedAt IS NULL")
       .getOne();
 
     if (!user) {
-      throw new NotFoundException('Admin not found');
+      throw new NotFoundException("Admin not found");
     }
 
     return user;
@@ -424,7 +430,7 @@ export class AuthService {
   async resolveAuthorization(
     user: User,
   ): Promise<{ roleCode: string; permissions: string[] }> {
-    const roleCode = user.role?.code ?? 'VIEWER';
+    const roleCode = user.role?.code ?? "VIEWER";
     const permissions = user.role?.permissions
       ? user.role.permissions.map((p) => p.code)
       : [];
