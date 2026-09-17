@@ -1,7 +1,7 @@
-import { MigrationInterface, QueryRunner } from 'typeorm';
+import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class InitialSchema1700000000000 implements MigrationInterface {
-  name = 'InitialSchema1700000000000';
+  name = "InitialSchema1700000000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
@@ -69,7 +69,9 @@ export class InitialSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(
       `CREATE UNIQUE INDEX "users_username_unique" ON "users"("username") WHERE "deleted_at" IS NULL`,
     );
-    await queryRunner.query(`CREATE INDEX "idx_users_status" ON "users"("status")`);
+    await queryRunner.query(
+      `CREATE INDEX "idx_users_status" ON "users"("status")`,
+    );
 
     // refresh_tokens
     await queryRunner.query(`
@@ -419,7 +421,9 @@ export class InitialSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE IF EXISTS "cars" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "vehicle_models" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "brands" CASCADE`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "password_reset_tokens" CASCADE`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "password_reset_tokens" CASCADE`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "login_otp_tokens" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "refresh_tokens" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "users" CASCADE`);

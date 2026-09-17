@@ -24,3 +24,4 @@ COPY --from=builder /app/dist ./dist
 EXPOSE 4000
 
 CMD ["node", "dist/main"]
+
