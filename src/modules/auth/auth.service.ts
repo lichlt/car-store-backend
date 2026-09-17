@@ -7,6 +7,7 @@ import {
   HttpStatus,
   forwardRef,
   Inject,
+  Optional,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -30,6 +31,7 @@ import {
   normalizeEmail,
 } from "../../common/utils/crypto.utils";
 import { REFRESH_TOKEN_COOKIE } from "../../common/constants/app.constants";
+import { MolTokenService, MOL_TOKEN_COOKIE } from "./mol-token.service";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -59,6 +61,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    @Optional()
+    private readonly molTokenService?: MolTokenService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -198,8 +202,36 @@ export class AuthService {
 
     this.setRefreshCookie(response, rawRefresh);
 
+    let molToken: string | undefined;
+    if (this.molTokenService) {
+      molToken = await this.molTokenService.issue(
+        {
+          audience: 'admin',
+          userId: user.id,
+          roleCode: user.role?.code ?? 'VIEWER',
+          permissions: user.role?.permissions?.map((p) => p.code) ?? [],
+          tokenVersion: user.tokenVersion,
+        },
+        deviceId,
+      );
+
+      const cookieDomain = this.configService.get<string>('COOKIE_DOMAIN');
+      const durationSec =
+        this.configService.get<number>('MOL_TOKEN_DURATION_SECONDS') ?? 600;
+      response.cookie(MOL_TOKEN_COOKIE, molToken, {
+        httpOnly: true,
+        secure: this.configService.get<string>('NODE_ENV') === 'production',
+        sameSite: 'strict',
+        domain: cookieDomain && cookieDomain !== 'localhost' ? cookieDomain : undefined,
+        maxAge: durationSec * 1000,
+      });
+    }
+
     const accessToken = this.buildJwt(user, user.role);
-    return { accessToken };
+    return {
+      accessToken,
+      ...(molToken ? { molToken } : {}),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -278,6 +310,11 @@ export class AuthService {
     }
 
     this.clearRefreshCookie(response);
+
+    const cookieDomain = this.configService.get<string>('COOKIE_DOMAIN');
+    response.clearCookie(MOL_TOKEN_COOKIE, {
+      domain: cookieDomain && cookieDomain !== 'localhost' ? cookieDomain : undefined,
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -289,18 +326,29 @@ export class AuthService {
       .createQueryBuilder()
       .update(RefreshToken)
       .set({ revokedAt: new Date() })
-      .where("userId = :userId AND revokedAt IS NULL", { userId })
+      .where('userId = :userId', { userId })
+      .andWhere('revokedAt IS NULL')
       .execute();
 
-    // Increment tokenVersion to invalidate all outstanding JWTs
+    // Revoke all Redis sessions
+    if (this.molTokenService) {
+      await this.molTokenService.revokeAll('admin', userId);
+    }
+
+    // Invalidate access tokens by bumping tokenVersion
     await this.userRepo
       .createQueryBuilder()
       .update(User)
-      .set({ tokenVersion: () => '"tokenVersion" + 1' })
-      .where("id = :id", { id: userId })
+      .set({ tokenVersion: () => 'token_version + 1' })
+      .where('id = :userId', { userId })
       .execute();
 
     this.clearRefreshCookie(response);
+
+    const cookieDomain = this.configService.get<string>('COOKIE_DOMAIN');
+    response.clearCookie(MOL_TOKEN_COOKIE, {
+      domain: cookieDomain && cookieDomain !== 'localhost' ? cookieDomain : undefined,
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────

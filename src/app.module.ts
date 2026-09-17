@@ -20,6 +20,7 @@ import { CmsModule } from "./modules/cms/cms.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { AuditModule } from "./modules/audit/audit.module";
+import { RedisModule } from "./modules/redis/redis.module";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     DashboardModule,
     ReportsModule,
     AuditModule,
+    RedisModule,
   ],
 })
 export class AppModule {}

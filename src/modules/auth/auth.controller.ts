@@ -57,7 +57,7 @@ export class AuthController {
     @Body() dto: VerifyOtpDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; molToken?: string }> {
     const deviceId = this.resolveDeviceId(req);
     const ipAddress = this.resolveIp(req);
     const userAgent = (req.headers['user-agent'] as string) ?? '';

@@ -15,6 +15,7 @@ import { LoginOtpToken } from './entities/login-otp-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 
 import { UsersModule } from '../users/users.module';
+import { MolTokenService } from './mol-token.service';
 
 @Module({
   imports: [
@@ -40,7 +41,7 @@ import { UsersModule } from '../users/users.module';
     forwardRef(() => UsersModule),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, MailService],
-  exports: [AuthService, JwtStrategy, PassportModule],
+  providers: [AuthService, JwtStrategy, MailService, MolTokenService],
+  exports: [AuthService, JwtStrategy, PassportModule, MolTokenService],
 })
 export class AuthModule {}

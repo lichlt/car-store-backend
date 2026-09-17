@@ -29,6 +29,20 @@ class EnvironmentVariables {
   DATABASE_URL: string;
 
   @IsString()
+  @IsOptional()
+  REDIS_URL?: string = 'redis://localhost:6379';
+
+  @IsString()
+  @IsOptional()
+  MOL_TOKEN_ENCRYPTION_SECRET?: string;
+
+  @IsInt()
+  @Min(60)
+  @Max(86400)
+  @IsOptional()
+  MOL_TOKEN_DURATION_SECONDS?: number = 600;
+
+  @IsString()
   JWT_ACCESS_SECRET: string;
 
   @IsString()
