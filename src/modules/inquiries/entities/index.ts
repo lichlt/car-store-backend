@@ -1,2 +1,3 @@
-export { Inquiry } from './inquiry.entity';
-export type { InquiryType, InquiryStatus, InquiryContact } from './inquiry.entity';
+export { Inquiry, InquiryType, InquiryStatus } from './inquiry.entity';
+export type { InquiryContact } from './inquiry.entity';
+

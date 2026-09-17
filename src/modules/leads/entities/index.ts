@@ -1,7 +1,9 @@
-export { Lead } from './lead.entity';
+export { Lead, LeadStatus } from './lead.entity';
 export type {
-  LeadStatus,
   NoteEntry,
   CommunicationEntry,
   StatusHistoryEntry,
+  CarInfo,
+  ContactInfo,
 } from './lead.entity';
+

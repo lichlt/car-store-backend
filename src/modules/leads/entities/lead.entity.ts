@@ -8,16 +8,16 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-} from 'typeorm';
-import type { Relation } from 'typeorm';
-import { User } from '../../users/entities/user.entity';
+} from "typeorm";
+import type { Relation } from "typeorm";
+import { User } from "../../users/entities/user.entity";
 
 export enum LeadStatus {
-  NEW = 'NEW',
-  CONTACTED = 'CONTACTED',
-  QUOTED = 'QUOTED',
-  COMPLETED = 'COMPLETED',
-  REJECTED = 'REJECTED',
+  NEW = "NEW",
+  CONTACTED = "CONTACTED",
+  QUOTED = "QUOTED",
+  COMPLETED = "COMPLETED",
+  REJECTED = "REJECTED",
 }
 
 export interface NoteEntry {
@@ -62,58 +62,58 @@ export interface ContactInfo {
   preferredContact?: string;
 }
 
-@Entity('leads')
-@Index(['status', 'createdAt'])
+@Entity("leads")
+@Index(["status", "createdAt"])
 export class Lead {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: 'reference_no', length: 50, unique: true })
+  @Column({ name: "reference_no", length: 50, unique: true })
   referenceNo: string;
 
-  @Column({ name: 'car_info', type: 'simple-json', nullable: true })
+  @Column({ name: "car_info", type: "simple-json", nullable: true })
   carInfo: CarInfo | null;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({ type: "simple-json", nullable: true })
   contact: ContactInfo | null;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({ type: "simple-json", nullable: true })
   images: string[] | null;
 
   @Column({ length: 50, nullable: true })
   source: string | null;
 
-  @Column({ length: 20, default: 'NEW' })
+  @Column({ length: 20, default: "NEW" })
   status: LeadStatus;
 
   @ManyToOne(() => User, { nullable: true })
-  @JoinColumn({ name: 'assigned_to' })
+  @JoinColumn({ name: "assigned_to" })
   assignedTo: Relation<User> | null;
 
-  @Column({ name: 'quoted_price_cents', type: 'bigint', nullable: true })
+  @Column({ name: "quoted_price_cents", type: "bigint", nullable: true })
   quotedPriceCents: string | null;
 
-  @Column({ type: 'simple-json', default: '[]' })
+  @Column({ type: "simple-json", default: "[]" })
   notes: NoteEntry[];
 
-  @Column({ type: 'simple-json', default: '[]' })
+  @Column({ type: "simple-json", default: "[]" })
   communications: CommunicationEntry[];
 
-  @Column({ name: 'status_history', type: 'simple-json', default: '[]' })
+  @Column({ name: "status_history", type: "simple-json", default: "[]" })
   statusHistory: StatusHistoryEntry[];
 
-  @Column({ name: 'next_follow_up_at', type: 'timestamp', nullable: true })
+  @Column({ name: "next_follow_up_at", type: "timestamp", nullable: true })
   nextFollowUpAt: Date | null;
 
-  @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
+  @Column({ name: "completed_at", type: "timestamp", nullable: true })
   completedAt: Date | null;
 
-  @DeleteDateColumn({ name: 'deleted_at' })
+  @DeleteDateColumn({ name: "deleted_at" })
   deletedAt: Date | null;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: "updated_at" })
   updatedAt: Date;
 }

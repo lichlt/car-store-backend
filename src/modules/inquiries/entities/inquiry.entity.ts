@@ -8,25 +8,28 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-} from 'typeorm';
-import type { Relation } from 'typeorm';
-import { User } from '../../users/entities/user.entity';
-import { Car } from '../../cars/entities/car.entity';
-import type { NoteEntry, StatusHistoryEntry } from '../../leads/entities/lead.entity';
+} from "typeorm";
+import type { Relation } from "typeorm";
+import { User } from "../../users/entities/user.entity";
+import { Car } from "../../cars/entities/car.entity";
+import type {
+  NoteEntry,
+  StatusHistoryEntry,
+} from "../../leads/entities/lead.entity";
 
 export enum InquiryType {
-  CONTACT = 'CONTACT',
-  TEST_DRIVE = 'TEST_DRIVE',
-  FINANCING = 'FINANCING',
-  SERVICE = 'SERVICE',
+  CONTACT = "CONTACT",
+  TEST_DRIVE = "TEST_DRIVE",
+  FINANCING = "FINANCING",
+  SERVICE = "SERVICE",
 }
 
 export enum InquiryStatus {
-  NEW = 'NEW',
-  CONTACTED = 'CONTACTED',
-  PROCESSING = 'PROCESSING',
-  RESOLVED = 'RESOLVED',
-  CLOSED = 'CLOSED',
+  NEW = "NEW",
+  CONTACTED = "CONTACTED",
+  PROCESSING = "PROCESSING",
+  RESOLVED = "RESOLVED",
+  CLOSED = "CLOSED",
 }
 
 export interface InquiryContact {
@@ -36,47 +39,47 @@ export interface InquiryContact {
   message?: string;
 }
 
-@Entity('inquiries')
-@Index(['status', 'createdAt'])
+@Entity("inquiries")
+@Index(["status", "createdAt"])
 export class Inquiry {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: 'reference_no', length: 50, unique: true })
+  @Column({ name: "reference_no", length: 50, unique: true })
   referenceNo: string;
 
   @Column({ length: 30 })
   type: InquiryType;
 
   @ManyToOne(() => Car, { nullable: true })
-  @JoinColumn({ name: 'car_id' })
+  @JoinColumn({ name: "car_id" })
   car: Relation<Car> | null;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({ type: "simple-json", nullable: true })
   contact: InquiryContact | null;
 
-  @Column({ name: 'preferred_date', type: 'timestamp', nullable: true })
+  @Column({ name: "preferred_date", type: "timestamp", nullable: true })
   preferredDate: Date | null;
 
-  @Column({ length: 30, default: 'NEW' })
+  @Column({ length: 30, default: "NEW" })
   status: InquiryStatus;
 
   @ManyToOne(() => User, { nullable: true })
-  @JoinColumn({ name: 'assigned_to' })
+  @JoinColumn({ name: "assigned_to" })
   assignedTo: Relation<User> | null;
 
-  @Column({ type: 'simple-json', default: '[]' })
+  @Column({ type: "simple-json", default: "[]" })
   notes: NoteEntry[];
 
-  @Column({ name: 'status_history', type: 'simple-json', default: '[]' })
+  @Column({ name: "status_history", type: "simple-json", default: "[]" })
   statusHistory: StatusHistoryEntry[];
 
-  @DeleteDateColumn({ name: 'deleted_at' })
+  @DeleteDateColumn({ name: "deleted_at" })
   deletedAt: Date | null;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: "updated_at" })
   updatedAt: Date;
 }
