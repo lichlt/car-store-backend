@@ -1,4 +1,4 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance } from "class-transformer";
 import {
   IsEnum,
   IsInt,
@@ -8,12 +8,12 @@ import {
   Max,
   Min,
   validateSync,
-} from 'class-validator';
+} from "class-validator";
 
 enum Environment {
-  Development = 'development',
-  Test = 'test',
-  Production = 'production',
+  Development = "development",
+  Test = "test",
+  Production = "production",
 }
 
 class EnvironmentVariables {
@@ -30,7 +30,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  REDIS_URL?: string = 'redis://localhost:6379';
+  REDIS_URL?: string = "redis://localhost:6379";
 
   @IsString()
   @IsOptional()
@@ -50,7 +50,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  ACCESS_TOKEN_TTL?: string = '15m';
+  ACCESS_TOKEN_TTL?: string = "15m";
 
   @IsInt()
   @Min(1)
@@ -75,7 +75,7 @@ class EnvironmentVariables {
 
   @IsUrl()
   @IsOptional()
-  FRONTEND_URL?: string = 'http://localhost:3000';
+  FRONTEND_URL?: string = "http://localhost:3000";
 
   @IsString()
   @IsOptional()
@@ -111,7 +111,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  LOG_LEVEL?: string = 'info';
+  LOG_LEVEL?: string = "info";
 
   @IsString()
   @IsOptional()
@@ -130,7 +130,9 @@ class EnvironmentVariables {
   SEED_ADMIN_FULL_NAME?: string;
 }
 
-export function validate(config: Record<string, unknown>): EnvironmentVariables {
+export function validate(
+  config: Record<string, unknown>,
+): EnvironmentVariables {
   const validatedConfig = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });

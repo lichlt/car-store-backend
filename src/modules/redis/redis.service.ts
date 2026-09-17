@@ -3,10 +3,10 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Redis } from 'ioredis';
-import type { Readable } from 'node:stream';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Redis } from "ioredis";
+import type { Readable } from "node:stream";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -17,7 +17,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     const redisUrl =
-      this.configService.get<string>('REDIS_URL') ?? 'redis://localhost:6379';
+      this.configService.get<string>("REDIS_URL") ?? "redis://localhost:6379";
 
     this.client = new Redis(redisUrl, {
       lazyConnect: true,
@@ -25,7 +25,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       enableOfflineQueue: false,
     });
 
-    this.client.on('error', (err) => {
+    this.client.on("error", (err) => {
       this.logger.warn(`Redis connection error: ${(err as Error).message}`);
     });
 
@@ -33,7 +33,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     this.client
       .connect()
       .then(() => {
-        this.logger.log('Redis connected successfully');
+        this.logger.log("Redis connected successfully");
       })
       .catch((err) => {
         this.logger.warn(
@@ -43,9 +43,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.client && this.client.status !== 'end') {
+    if (this.client && this.client.status !== "end") {
       await this.client.quit();
-      this.logger.log('Redis disconnected gracefully');
+      this.logger.log("Redis disconnected gracefully");
     }
   }
 
@@ -57,7 +57,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       return await this.client.get(key);
     } catch (err) {
-      this.logger.warn(`Redis GET failed for key "${key}": ${(err as Error).message}`);
+      this.logger.warn(
+        `Redis GET failed for key "${key}": ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -66,14 +68,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     key: string,
     value: string,
     seconds?: number,
-  ): Promise<'OK' | null> {
+  ): Promise<"OK" | null> {
     try {
       if (seconds) {
-        return await this.client.set(key, value, 'EX', seconds);
+        return await this.client.set(key, value, "EX", seconds);
       }
       return await this.client.set(key, value);
     } catch (err) {
-      this.logger.warn(`Redis SET failed for key "${key}": ${(err as Error).message}`);
+      this.logger.warn(
+        `Redis SET failed for key "${key}": ${(err as Error).message}`,
+      );
       return null;
     }
   }
@@ -93,7 +97,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       const result = await this.client.expire(key, seconds);
       return result === 1;
     } catch (err) {
-      this.logger.warn(`Redis EXPIRE failed for key "${key}": ${(err as Error).message}`);
+      this.logger.warn(
+        `Redis EXPIRE failed for key "${key}": ${(err as Error).message}`,
+      );
       return false;
     }
   }

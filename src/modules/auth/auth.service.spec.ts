@@ -4,10 +4,10 @@ import { getRepositoryToken } from "@nestjs/typeorm";
 import { JwtService } from "@nestjs/jwt";
 import { AuthService } from "./auth.service";
 import { User } from "../users/entities/user.entity";
-import { RefreshToken } from "./entities/refresh-token.entity";
 import { LoginOtpToken } from "./entities/login-otp-token.entity";
 import { PasswordResetToken } from "./entities/password-reset-token.entity";
 import { MailService } from "./mail.service";
+import { RedisService } from "../redis/redis.service";
 
 describe("AuthService", () => {
   let service: AuthService;
@@ -15,13 +15,7 @@ describe("AuthService", () => {
   const mockUserRepo = {
     findOne: jest.fn(),
     save: jest.fn(),
-  };
-
-  const mockRefreshTokenRepo = {
-    create: jest.fn(),
-    save: jest.fn(),
-    findOne: jest.fn(),
-    update: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   const mockOtpRepo = {
@@ -40,6 +34,14 @@ describe("AuthService", () => {
 
   const mockJwtService = {
     sign: jest.fn().mockReturnValue("mock.jwt.token"),
+  };
+
+  const mockRedisService = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    expire: jest.fn(),
+    scanStream: jest.fn(),
   };
 
   const mockConfigService = {
@@ -67,10 +69,6 @@ describe("AuthService", () => {
       providers: [
         AuthService,
         { provide: getRepositoryToken(User), useValue: mockUserRepo },
-        {
-          provide: getRepositoryToken(RefreshToken),
-          useValue: mockRefreshTokenRepo,
-        },
         { provide: getRepositoryToken(LoginOtpToken), useValue: mockOtpRepo },
         {
           provide: getRepositoryToken(PasswordResetToken),
@@ -79,6 +77,7 @@ describe("AuthService", () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: MailService, useValue: mockMailService },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 

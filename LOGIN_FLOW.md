@@ -30,16 +30,16 @@ sequenceDiagram
     %% BƯỚC 2: VERIFY OTP
     Note over Admin,Redis: BƯỚC 2: Xác thực OTP -> Cấp quyền & Khởi tạo phiên
     Admin->>Web: Nhập mã OTP 6 số
-    Web->>API: POST /api/auth/verify-otp { challengeId, otp }
+    Web->>API: POST /api/auth/verify-otp { challengeId, otp } (Header: x-device-id)
     API->>DB: Tìm challenge trong login_otp_tokens
     API->>API: Kiểm tra attempts < 5 & so khớp mã băm
     API->>DB: Đánh dấu used_at = NOW, update last_login_at
     API->>DB: Load User kèm Role và danh sách Permissions
-    
+
     %% Khởi tạo Tokens & Redis
-    API->>DB: Lưu Refresh Token mới vào refresh_tokens (Rotation Family)
+    API->>Redis: Lưu Refresh Token: refresh:{hash} & user_refresh:{userId}:{hash} (TTL: 7d)
     API->>Redis: Lưu Active Session: mol:session:admin:{userId}:{deviceId} (TTL: 600s)
-    API->>API: Ký JWT Access Token (hạn 15m)
+    API->>API: Ký JWT Access Token (hạn 15m, chứa sub, role, permissions, tokenVersion)
     API-->>Web: Trả về { accessToken, molToken }<br/>Set HttpOnly Cookies: "refresh_token" & "MOLToken"
     Web-->>Admin: Đăng nhập thành công, vào Dashboard
 ```

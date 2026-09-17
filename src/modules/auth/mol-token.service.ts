@@ -1,8 +1,5 @@
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
   createCipheriv,
   createDecipheriv,
@@ -10,14 +7,14 @@ import {
   randomBytes,
   randomUUID,
   timingSafeEqual,
-} from 'node:crypto';
-import { RedisService } from '../redis/redis.service';
+} from "node:crypto";
+import { RedisService } from "../redis/redis.service";
 
-export const MOL_TOKEN_COOKIE = 'MOLToken';
-const TOKEN_SCHEME = 'MOLToken';
-const CACHE_PREFIX = 'mol:session';
+export const MOL_TOKEN_COOKIE = "MOLToken";
+const TOKEN_SCHEME = "MOLToken";
+const CACHE_PREFIX = "mol:session";
 
-export type MOLTokenAudience = 'admin' | 'citizen';
+export type MOLTokenAudience = "admin" | "citizen";
 
 export interface MOLTokenData {
   audience: MOLTokenAudience;
@@ -46,14 +43,14 @@ export class MolTokenService {
   ) {}
 
   private durationSeconds(): number {
-    return this.configService.get<number>('MOL_TOKEN_DURATION_SECONDS') ?? 600;
+    return this.configService.get<number>("MOL_TOKEN_DURATION_SECONDS") ?? 600;
   }
 
   private encryptionKey(): Buffer {
     const secret =
-      this.configService.get<string>('MOL_TOKEN_ENCRYPTION_SECRET') ??
-      'carstore_development_only_change_this_secret_2026';
-    return createHash('sha256').update(secret).digest();
+      this.configService.get<string>("MOL_TOKEN_ENCRYPTION_SECRET") ??
+      "carstore_development_only_change_this_secret_2026";
+    return createHash("sha256").update(secret).digest();
   }
 
   private cacheKey(
@@ -65,12 +62,12 @@ export class MolTokenService {
   }
 
   private tokenHash(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
+    return createHash("sha256").update(token).digest("hex");
   }
 
   private hashesMatch(left: string, right: string): boolean {
-    const leftBuffer = Buffer.from(left, 'hex');
-    const rightBuffer = Buffer.from(right, 'hex');
+    const leftBuffer = Buffer.from(left, "hex");
+    const rightBuffer = Buffer.from(right, "hex");
     return (
       leftBuffer.length === rightBuffer.length &&
       timingSafeEqual(leftBuffer, rightBuffer)
@@ -79,60 +76,59 @@ export class MolTokenService {
 
   encrypt(data: MOLTokenData): string {
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey(), iv);
+    const cipher = createCipheriv("aes-256-gcm", this.encryptionKey(), iv);
     const encrypted = Buffer.concat([
-      cipher.update(JSON.stringify(data), 'utf8'),
+      cipher.update(JSON.stringify(data), "utf8"),
       cipher.final(),
     ]);
     const tag = cipher.getAuthTag();
     return [iv, tag, encrypted]
-      .map((part) => part.toString('base64url'))
-      .join('.');
+      .map((part) => part.toString("base64url"))
+      .join(".");
   }
 
   decryptMOLToken(token: string): MOLTokenData {
     try {
-      const parts = token.split('.');
-      if (parts.length !== 3) throw new Error('Malformed token');
+      const parts = token.split(".");
+      if (parts.length !== 3) throw new Error("Malformed token");
       const [ivPart, tagPart, encryptedPart] = parts;
       if (!ivPart || !tagPart || !encryptedPart)
-        throw new Error('Malformed token');
+        throw new Error("Malformed token");
 
       const decipher = createDecipheriv(
-        'aes-256-gcm',
+        "aes-256-gcm",
         this.encryptionKey(),
-        Buffer.from(ivPart, 'base64url'),
+        Buffer.from(ivPart, "base64url"),
       );
-      decipher.setAuthTag(Buffer.from(tagPart, 'base64url'));
+      decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
       const decrypted = Buffer.concat([
-        decipher.update(Buffer.from(encryptedPart, 'base64url')),
+        decipher.update(Buffer.from(encryptedPart, "base64url")),
         decipher.final(),
       ]);
 
-      const data = JSON.parse(decrypted.toString('utf8')) as Partial<MOLTokenData>;
+      const data = JSON.parse(
+        decrypted.toString("utf8"),
+      ) as Partial<MOLTokenData>;
       if (
-        (data.audience !== 'admin' && data.audience !== 'citizen') ||
-        typeof data.userId !== 'string' ||
-        typeof data.roleCode !== 'string' ||
+        (data.audience !== "admin" && data.audience !== "citizen") ||
+        typeof data.userId !== "string" ||
+        typeof data.roleCode !== "string" ||
         !Array.isArray(data.permissions) ||
-        !data.permissions.every((item) => typeof item === 'string') ||
-        typeof data.authLevel !== 'string' ||
-        typeof data.deviceId !== 'string' ||
-        typeof data.tokenVersion !== 'number' ||
-        typeof data.timestamp !== 'number'
+        !data.permissions.every((item) => typeof item === "string") ||
+        typeof data.authLevel !== "string" ||
+        typeof data.deviceId !== "string" ||
+        typeof data.tokenVersion !== "number" ||
+        typeof data.timestamp !== "number"
       ) {
-        throw new Error('Invalid token payload');
+        throw new Error("Invalid token payload");
       }
       return data as MOLTokenData;
     } catch {
-      throw new UnauthorizedException('MOL token is invalid');
+      throw new UnauthorizedException("MOL token is invalid");
     }
   }
 
-  async issue(
-    identity: MOLTokenIdentity,
-    deviceId: string,
-  ): Promise<string> {
+  async issue(identity: MOLTokenIdentity, deviceId: string): Promise<string> {
     const data: MOLTokenData = {
       ...identity,
       authLevel: identity.roleCode,
@@ -142,7 +138,10 @@ export class MolTokenService {
     const token = this.encrypt(data);
     await this.redisService.set(
       this.cacheKey(data.audience, data.userId, data.deviceId),
-      JSON.stringify({ deviceId: data.deviceId, tokenHash: this.tokenHash(token) }),
+      JSON.stringify({
+        deviceId: data.deviceId,
+        tokenHash: this.tokenHash(token),
+      }),
       this.durationSeconds(),
     );
     return token;
@@ -155,11 +154,11 @@ export class MolTokenService {
   ): Promise<MOLTokenData> {
     const data = this.decryptMOLToken(token);
     if (expectedAudience && data.audience !== expectedAudience) {
-      throw new UnauthorizedException('MOL token audience is invalid');
+      throw new UnauthorizedException("MOL token audience is invalid");
     }
     if (requestDeviceId && requestDeviceId !== data.deviceId) {
       throw new UnauthorizedException(
-        'Device id does not match the active token',
+        "Device id does not match the active token",
       );
     }
 
@@ -167,7 +166,7 @@ export class MolTokenService {
       this.cacheKey(data.audience, data.userId, data.deviceId),
     );
     if (!cached) {
-      throw new UnauthorizedException('MOL session is not active');
+      throw new UnauthorizedException("MOL session is not active");
     }
 
     try {
@@ -177,13 +176,13 @@ export class MolTokenService {
       };
       if (
         active.deviceId !== data.deviceId ||
-        typeof active.tokenHash !== 'string' ||
+        typeof active.tokenHash !== "string" ||
         !this.hashesMatch(active.tokenHash, this.tokenHash(token))
       ) {
-        throw new Error('Session mismatch');
+        throw new Error("Session mismatch");
       }
     } catch {
-      throw new UnauthorizedException('MOL session is invalid');
+      throw new UnauthorizedException("MOL session is invalid");
     }
 
     return data;
@@ -195,7 +194,7 @@ export class MolTokenService {
       this.durationSeconds(),
     );
     if (!extended) {
-      throw new UnauthorizedException('MOL session is not active');
+      throw new UnauthorizedException("MOL session is not active");
     }
   }
 
@@ -205,10 +204,7 @@ export class MolTokenService {
     );
   }
 
-  async revokeAll(
-    audience: MOLTokenAudience,
-    userId: string,
-  ): Promise<void> {
+  async revokeAll(audience: MOLTokenAudience, userId: string): Promise<void> {
     const stream = this.redisService.scanStream({
       match: `${CACHE_PREFIX}:${audience}:${userId}:*`,
       count: 100,

@@ -22,14 +22,21 @@ export class MailService {
   /**
    * Send a one-time password to the user's email for login verification.
    */
-  async sendLoginOtp(email: string, otp: string): Promise<void> {
-    const from = this.configService.get<string>('SMTP_FROM', 'CarStore <noreply@carstore.vn>');
+  async sendLoginOtp(
+    email: string,
+    otp: string,
+    fullName?: string,
+  ): Promise<void> {
+    const from =
+      this.configService.get<string>('MAIL_FROM') ??
+      this.configService.get<string>('SMTP_FROM', 'CarStore <noreply@carstore.vn>');
+    const greeting = fullName ? `Hello ${fullName},` : 'Hello,';
     const mailOptions: Mail.Options = {
       from,
       to: email,
       subject: '[CarStore] Your Login Verification Code',
       text: [
-        'Hello,',
+        greeting,
         '',
         `Your one-time login code is: ${otp}`,
         '',
@@ -47,14 +54,21 @@ export class MailService {
   /**
    * Send a password-reset link to the user's email.
    */
-  async sendPasswordReset(email: string, resetUrl: string): Promise<void> {
-    const from = this.configService.get<string>('SMTP_FROM', 'CarStore <noreply@carstore.vn>');
+  async sendPasswordReset(
+    email: string,
+    resetUrl: string,
+    fullName?: string,
+  ): Promise<void> {
+    const from =
+      this.configService.get<string>('MAIL_FROM') ??
+      this.configService.get<string>('SMTP_FROM', 'CarStore <noreply@carstore.vn>');
+    const greeting = fullName ? `Hello ${fullName},` : 'Hello,';
     const mailOptions: Mail.Options = {
       from,
       to: email,
       subject: '[CarStore] Reset Your Password',
       text: [
-        'Hello,',
+        greeting,
         '',
         'You requested a password reset. Click the link below to set a new password:',
         '',

@@ -73,29 +73,6 @@ export class InitialSchema1700000000000 implements MigrationInterface {
       `CREATE INDEX "idx_users_status" ON "users"("status")`,
     );
 
-    // refresh_tokens
-    await queryRunner.query(`
-      CREATE TABLE "refresh_tokens" (
-        "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        "user_id" UUID NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
-        "family_id" VARCHAR NOT NULL,
-        "token_hash" VARCHAR(255) NOT NULL UNIQUE,
-        "expires_at" TIMESTAMPTZ NOT NULL,
-        "revoked_at" TIMESTAMPTZ,
-        "replaced_by_id" VARCHAR,
-        "user_agent" VARCHAR(500),
-        "ip_hash" VARCHAR(64),
-        "device_id" VARCHAR(255),
-        "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-    await queryRunner.query(
-      `CREATE INDEX "idx_refresh_tokens_family" ON "refresh_tokens"("family_id")`,
-    );
-    await queryRunner.query(
-      `CREATE INDEX "idx_refresh_tokens_expires" ON "refresh_tokens"("expires_at")`,
-    );
-
     // login_otp_tokens
     await queryRunner.query(`
       CREATE TABLE "login_otp_tokens" (
@@ -425,7 +402,6 @@ export class InitialSchema1700000000000 implements MigrationInterface {
       `DROP TABLE IF EXISTS "password_reset_tokens" CASCADE`,
     );
     await queryRunner.query(`DROP TABLE IF EXISTS "login_otp_tokens" CASCADE`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "refresh_tokens" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "users" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "role_permissions" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "roles" CASCADE`);
