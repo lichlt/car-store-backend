@@ -80,7 +80,7 @@ export class Lead {
   @Column({ type: "simple-json", nullable: true })
   images: string[] | null;
 
-  @Column({ length: 50, nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   source: string | null;
 
   @Column({ length: 20, default: "NEW" })

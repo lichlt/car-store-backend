@@ -28,10 +28,10 @@ export class Car {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: "stock_no", length: 50, unique: true, nullable: true })
+  @Column({ name: "stock_no", type: "varchar", length: 50, unique: true, nullable: true })
   stockNo: string | null;
 
-  @Column({ length: 200, unique: true, nullable: true })
+  @Column({ type: "varchar", length: 200, unique: true, nullable: true })
   slug: string | null;
 
   @Column({ name: "brand_id" })
@@ -67,10 +67,10 @@ export class Car {
   @Column({ name: "power_kw", type: "float", nullable: true })
   powerKw: number | null;
 
-  @Column({ name: "fuel_type", length: 50, nullable: true })
+  @Column({ name: "fuel_type", type: "varchar", length: 50, nullable: true })
   fuelType: string | null;
 
-  @Column({ length: 50, nullable: true })
+  @Column({ type: "varchar", length: 50, nullable: true })
   transmission: string | null;
 
   @Column({ type: "int", nullable: true })
@@ -100,10 +100,10 @@ export class Car {
   @Column({ type: "text", nullable: true })
   description: string | null;
 
-  @Column({ name: "seo_title", length: 200, nullable: true })
+  @Column({ name: "seo_title", type: "varchar", length: 200, nullable: true })
   seoTitle: string | null;
 
-  @Column({ name: "seo_description", length: 500, nullable: true })
+  @Column({ name: "seo_description", type: "varchar", length: 500, nullable: true })
   seoDescription: string | null;
 
   @ManyToOne(() => User, { nullable: true })

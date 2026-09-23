@@ -27,7 +27,7 @@ export class CarImage {
   @Column({ name: 'secure_url' })
   secureUrl: string;
 
-  @Column({ name: 'alt_text', length: 200, nullable: true })
+  @Column({ name: 'alt_text', type: 'varchar', length: 200, nullable: true })
   altText: string | null;
 
   @Column({ type: 'int', nullable: true })
@@ -39,7 +39,7 @@ export class CarImage {
   @Column({ type: 'int', nullable: true })
   bytes: number | null;
 
-  @Column({ name: 'mime_type', length: 50, nullable: true })
+  @Column({ name: 'mime_type', type: 'varchar', length: 50, nullable: true })
   mimeType: string | null;
 
   @Column({ type: 'int', default: 0 })

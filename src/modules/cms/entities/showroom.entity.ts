@@ -24,10 +24,10 @@ export class Showroom {
   @Column({ type: 'float', nullable: true })
   lng: number | null;
 
-  @Column({ length: 30, nullable: true })
+  @Column({ type: 'varchar', length: 30, nullable: true })
   phone: string | null;
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   email: string | null;
 
   @Column({ name: 'opening_hours', type: 'simple-json', nullable: true })

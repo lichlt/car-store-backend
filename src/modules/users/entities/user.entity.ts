@@ -48,7 +48,7 @@ export class User {
   @Column({ name: "avatar_url", type: "varchar", nullable: true })
   avatarUrl: string | null;
 
-  @Column({ length: 30, nullable: true })
+  @Column({ type: 'varchar', length: 30, nullable: true })
   phone: string | null;
 
   @Column({ name: "last_login_at", type: "timestamp", nullable: true })

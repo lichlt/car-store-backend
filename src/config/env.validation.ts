@@ -76,7 +76,7 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
-  FRONTEND_URL?: string = 'http://localhost:3000';
+  FRONTEND_URL?: string = "http://localhost:3000";
 
   @IsString()
   @IsOptional()

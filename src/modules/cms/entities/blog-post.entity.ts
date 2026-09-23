@@ -42,7 +42,7 @@ export class BlogPost {
   @Column({ name: "cover_url", type: "varchar", nullable: true })
   coverUrl: string | null;
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: "varchar", length: 100, nullable: true })
   category: string | null;
 
   @Column({ type: "simple-array", nullable: true })
@@ -55,10 +55,10 @@ export class BlogPost {
   @Column({ length: 20, default: "DRAFT" })
   status: BlogStatus;
 
-  @Column({ name: "seo_title", length: 200, nullable: true })
+  @Column({ name: "seo_title", type: "varchar", length: 200, nullable: true })
   seoTitle: string | null;
 
-  @Column({ name: "seo_description", length: 500, nullable: true })
+  @Column({ name: "seo_description", type: "varchar", length: 500, nullable: true })
   seoDescription: string | null;
 
   @Column({ name: "published_at", type: "timestamp", nullable: true })

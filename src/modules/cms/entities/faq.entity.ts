@@ -11,7 +11,7 @@ export class Faq {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   category: string | null;
 
   @Column({ type: 'text' })
