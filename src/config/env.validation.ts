@@ -4,7 +4,6 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   Max,
   Min,
   validateSync,
@@ -75,9 +74,9 @@ class EnvironmentVariables {
   @IsOptional()
   COOKIE_DOMAIN?: string;
 
-  @IsUrl()
+  @IsString()
   @IsOptional()
-  FRONTEND_URL?: string = "http://localhost:3000";
+  FRONTEND_URL?: string = 'http://localhost:3000';
 
   @IsString()
   @IsOptional()

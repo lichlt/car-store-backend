@@ -1,4 +1,4 @@
-import type { MOLTokenData } from '../../modules/auth/mol-token.service';
+import type { MOLTokenData } from "../../modules/auth/mol-token.service";
 
 export interface JwtPayload {
   /** User ID (UUID) */

@@ -1,15 +1,18 @@
-import 'multer';
+import "multer";
 import {
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { deleteFromCloudinary, uploadToCloudinary } from '../../config/cloudinary.config';
-import { CarImage } from './entities/car-image.entity';
-import { Car } from './entities/car.entity';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import {
+  deleteFromCloudinary,
+  uploadToCloudinary,
+} from "../../config/cloudinary.config";
+import { CarImage } from "./entities/car-image.entity";
+import { Car } from "./entities/car.entity";
 
 @Injectable()
 export class CarImagesService {
@@ -28,12 +31,12 @@ export class CarImagesService {
     files: Express.Multer.File[],
   ): Promise<CarImage[]> {
     if (!files || files.length === 0) {
-      throw new BadRequestException('No files uploaded');
+      throw new BadRequestException("No files uploaded");
     }
 
     const car = await this.carRepo.findOne({
       where: { id: carId },
-      relations: ['images'],
+      relations: ["images"],
     });
 
     if (!car) {
@@ -58,7 +61,7 @@ export class CarImagesService {
     for (const file of files) {
       const uploadResult = await uploadToCloudinary(file.buffer, {
         folder: `carstore/cars/${carId}`,
-        resource_type: 'image',
+        resource_type: "image",
       });
 
       const isCover = !hasCover;
@@ -72,7 +75,7 @@ export class CarImagesService {
         publicId: uploadResult.public_id,
         url: uploadResult.url,
         secureUrl: uploadResult.secure_url,
-        altText: `${car.variant || 'Car'} photo`,
+        altText: `${car.variant || "Car"} photo`,
         width: uploadResult.width,
         height: uploadResult.height,
         bytes: uploadResult.bytes,
@@ -144,7 +147,7 @@ export class CarImagesService {
   async removeImage(carId: string, imageId: string): Promise<void> {
     const image = await this.carImageRepo.findOne({
       where: { id: imageId, car: { id: carId } },
-      relations: ['car'],
+      relations: ["car"],
     });
 
     if (!image) {
@@ -167,7 +170,7 @@ export class CarImagesService {
     if (wasCover) {
       const remainingImages = await this.carImageRepo.find({
         where: { car: { id: carId } },
-        order: { position: 'ASC' },
+        order: { position: "ASC" },
       });
 
       if (remainingImages.length > 0) {

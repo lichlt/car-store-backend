@@ -9,7 +9,7 @@ declare global {
         encoding: string;
         mimetype: string;
         size: number;
-        stream: import('stream').Readable;
+        stream: import("stream").Readable;
         destination: string;
         filename: string;
         path: string;
