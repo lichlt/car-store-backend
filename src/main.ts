@@ -25,7 +25,11 @@ async function bootstrap(): Promise<void> {
   );
 
   // ── Middleware ────────────────────────────────────────────────────────────
-  app.use(cookieParser());
+  const cookieMiddleware =
+    typeof cookieParser === "function"
+      ? cookieParser
+      : (cookieParser as unknown as { default: typeof cookieParser }).default;
+  app.use(cookieMiddleware());
   app.use(helmet());
   app.enableCors({
     origin: frontendUrl,
