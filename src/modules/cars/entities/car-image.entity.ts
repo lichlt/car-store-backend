@@ -5,49 +5,49 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
-} from 'typeorm';
-import type { Relation } from 'typeorm';
-import { Car } from './car.entity';
+} from "typeorm";
+import type { Relation } from "typeorm";
+import { Car } from "./car.entity";
 
-@Entity('car_images')
+@Entity("car_images")
 export class CarImage {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @ManyToOne(() => Car, (car) => car.images, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'car_id' })
+  @ManyToOne(() => Car, (car) => car.images, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "car_id" })
   car: Relation<Car>;
 
-  @Column({ name: 'public_id' })
+  @Column({ name: "public_id" })
   publicId: string;
 
   @Column()
   url: string;
 
-  @Column({ name: 'secure_url' })
+  @Column({ name: "secure_url" })
   secureUrl: string;
 
-  @Column({ name: 'alt_text', type: 'varchar', length: 200, nullable: true })
+  @Column({ name: "alt_text", type: "varchar", length: 200, nullable: true })
   altText: string | null;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: "int", nullable: true })
   width: number | null;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: "int", nullable: true })
   height: number | null;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: "int", nullable: true })
   bytes: number | null;
 
-  @Column({ name: 'mime_type', type: 'varchar', length: 50, nullable: true })
+  @Column({ name: "mime_type", type: "varchar", length: 50, nullable: true })
   mimeType: string | null;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: "int", default: 0 })
   position: number;
 
-  @Column({ name: 'is_cover', default: false })
+  @Column({ name: "is_cover", default: false })
   isCover: boolean;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 }

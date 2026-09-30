@@ -28,7 +28,13 @@ export class Car {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: "stock_no", type: "varchar", length: 50, unique: true, nullable: true })
+  @Column({
+    name: "stock_no",
+    type: "varchar",
+    length: 50,
+    unique: true,
+    nullable: true,
+  })
   stockNo: string | null;
 
   @Column({ type: "varchar", length: 200, unique: true, nullable: true })
@@ -103,7 +109,12 @@ export class Car {
   @Column({ name: "seo_title", type: "varchar", length: 200, nullable: true })
   seoTitle: string | null;
 
-  @Column({ name: "seo_description", type: "varchar", length: 500, nullable: true })
+  @Column({
+    name: "seo_description",
+    type: "varchar",
+    length: 500,
+    nullable: true,
+  })
   seoDescription: string | null;
 
   @ManyToOne(() => User, { nullable: true })

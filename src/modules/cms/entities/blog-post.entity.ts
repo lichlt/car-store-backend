@@ -58,7 +58,12 @@ export class BlogPost {
   @Column({ name: "seo_title", type: "varchar", length: 200, nullable: true })
   seoTitle: string | null;
 
-  @Column({ name: "seo_description", type: "varchar", length: 500, nullable: true })
+  @Column({
+    name: "seo_description",
+    type: "varchar",
+    length: 500,
+    nullable: true,
+  })
   seoDescription: string | null;
 
   @Column({ name: "published_at", type: "timestamp", nullable: true })
